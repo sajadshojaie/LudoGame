@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { BookOpen, Bot, Copy, Check, LogOut, RotateCcw, UserPlus, Volume2, VolumeX } from "lucide-react";
 import type { GameState, Intent } from "@/types/game";
 import { buildLayout } from "@/utils/boardGeometry";
-import { activePlayer, legalMoves, playerFinished } from "@/utils/gameRules";
+import { activePlayer, isFinishedProgress, legalMoves, playerFinished } from "@/utils/gameRules";
 import { faDigits, themeFor } from "@/utils/palette";
 import { Dice } from "@/components/Dice";
 import { LudoBoard } from "@/components/LudoBoard";
@@ -28,14 +28,17 @@ export function GameScreen(props: GameScreenProps) {
   const { state } = props;
   const layout = useMemo(() => buildLayout(state.maxPlayers), [state.maxPlayers]);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const current = activePlayer(state);
+  const roller = state.players[state.rollerIndex] ?? current;
+  const displayed = props.diceRolling && state.phase === "roll" && roller ? roller : current;
   const moves = useMemo(() => legalMoves(state), [state]);
   const controllable =
     state.status === "playing" &&
-    current &&
-    !playerFinished(state, current.id) &&
-    (props.online ? current.id === props.myId : current.kind === "human");
+    displayed &&
+    !playerFinished(state, displayed.id) &&
+    (props.online ? displayed.id === props.myId : displayed.kind === "human");
   const canRoll = Boolean(controllable && state.phase === "roll" && !props.inputLocked && !props.diceRolling);
   const canMove = Boolean(controllable && state.phase === "move" && !props.inputLocked && !props.diceRolling);
   const place = (id: string) => {
@@ -77,7 +80,7 @@ export function GameScreen(props: GameScreenProps) {
           <button type="button" className="icon-btn" onClick={() => setRulesOpen(true)} aria-label="قوانین">
             <BookOpen size={16} />
           </button>
-          <button type="button" className="icon-btn" onClick={props.onLeave} aria-label="خروج">
+          <button type="button" className="icon-btn" onClick={() => setLeaveOpen(true)} aria-label="خروج">
             <LogOut size={16} />
           </button>
         </div>
@@ -90,7 +93,7 @@ export function GameScreen(props: GameScreenProps) {
               layout={layout}
               tokens={state.tokens}
               players={state.players}
-              currentSeat={current?.seat ?? null}
+              currentSeat={displayed?.seat ?? null}
               legalTokenIds={canMove ? moves.map((move) => move.tokenId) : []}
               lastMove={state.lastMove}
               onToken={(tokenId) => props.onAct({ type: "move", tokenId })}
@@ -106,13 +109,16 @@ export function GameScreen(props: GameScreenProps) {
           </div>
         ) : (
           <div className="flex w-full flex-col gap-6 lg:h-full lg:justify-between">
-            <TurnCard name={current?.name ?? "منچ بازی"} seat={current?.seat ?? 0} />
+            <TurnCard name={displayed?.name ?? "منچ بازی"} seat={displayed?.seat ?? 0} />
+            {state.lastMove && isFinishedProgress(state.lastMove.to, state.maxPlayers) ? (
+              <ArriveNote state={state} />
+            ) : null}
             <div className="flex items-center justify-center lg:flex-1">
               <Dice value={state.dice} rolling={props.diceRolling} enabled={canRoll} label="" onRoll={() => props.onAct({ type: "roll" })} />
             </div>
             <div className="flex flex-col gap-2">
               {state.players.map((player) => (
-                <SeatCard key={player.id} name={player.name} seat={player.seat} active={current?.id === player.id} bot={player.kind === "bot"} place={place(player.id)} />
+                <SeatCard key={player.id} name={player.name} seat={player.seat} active={displayed?.id === player.id} bot={player.kind === "bot"} place={place(player.id)} />
               ))}
               {state.rankings.length > 0 && (props.isHost || !props.online) ? (
                 <button type="button" className="btn-primary mt-2" onClick={() => props.onAct({ type: "rematch" })}>
@@ -125,6 +131,15 @@ export function GameScreen(props: GameScreenProps) {
       </aside>
 
       {rulesOpen ? <Rules onClose={() => setRulesOpen(false)} /> : null}
+      {leaveOpen ? (
+        <ConfirmLeave
+          onStay={() => setLeaveOpen(false)}
+          onLeave={() => {
+            setLeaveOpen(false);
+            props.onLeave();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -156,13 +171,48 @@ function LobbyPanel({ state, isHost, online, onAct }: GameScreenProps) {
           <button type="button" className="btn-ghost" disabled={empty === 0} onClick={() => onAct({ type: "add-bot" })}>
             <UserPlus size={16} /> افزودن ربات
           </button>
-          <button type="button" className="btn-primary" disabled={state.players.length < 2} onClick={() => onAct({ type: "start" })}>
+          <button type="button" className="btn-primary" disabled={state.players.length < 2 || state.players.length > state.maxPlayers} onClick={() => onAct({ type: "start" })}>
             شروع بازی
           </button>
         </div>
       ) : (
         <p className="mt-4 text-sm text-[#24506f]">منتظر شروع میزبان.</p>
       )}
+    </div>
+  );
+}
+
+function ArriveNote({ state }: { state: GameState }) {
+  const move = state.lastMove;
+  if (!move) return null;
+  const player = state.players.find((item) => item.seat === move.seat);
+  const theme = themeFor(move.seat);
+  const finished = player ? playerFinished(state, player.id) : false;
+  const text = finished
+    ? `${player?.name ?? "بازیکن"} همه مهره‌ها را به مرکز رساند.`
+    : `${player?.name ?? "بازیکن"} یک مهره را به مرکز رساند.`;
+  return (
+    <p className="rounded-2xl px-4 py-3 text-center text-sm font-bold text-[#14324f]" style={{ background: theme.soft }}>
+      {text}
+    </p>
+  );
+}
+
+function ConfirmLeave({ onStay, onLeave }: { onStay: () => void; onLeave: () => void }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 p-4 sm:items-center" onClick={onStay}>
+      <div className="w-full max-w-sm rounded-3xl bg-white p-6 text-[#16324d]" onClick={(event) => event.stopPropagation()}>
+        <h2 className="font-display text-3xl text-[#14324f]">خروج از بازی؟</h2>
+        <p className="mt-3 text-sm leading-relaxed text-[#24506f]">اگر خارج شوید این دست را ترک می‌کنید.</p>
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <button type="button" className="btn-ghost" onClick={onStay}>
+            ماندن
+          </button>
+          <button type="button" className="btn-primary" onClick={onLeave}>
+            خروج
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

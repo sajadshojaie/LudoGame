@@ -74,15 +74,16 @@ function ClassicBoard({
   currentSeat: number | null;
   nameById: Map<string, string>;
 }) {
+  const occupied = new Set(players.map((player) => player.seat));
   return (
     <>
       <polygon points={pts(layout.outline)} fill="#8ecff2" stroke="#f7fcff" strokeWidth={8} />
       {layout.yards.map((yard) => (
-        <ClassicYard key={`yard-${yard.seat}`} layout={layout} yard={yard} players={players} currentSeat={currentSeat} nameById={nameById} />
+        <ClassicYard key={`yard-${yard.seat}`} layout={layout} yard={yard} players={players} currentSeat={currentSeat} nameById={nameById} occupied={occupied.has(yard.seat)} />
       ))}
-      <CenterDiamond layout={layout} />
+      <CenterDiamond layout={layout} occupied={occupied} />
       {layout.track.map((cell) => (
-        <TrackStone key={`t-${cell.index}`} layout={layout} cell={cell} />
+        <TrackStone key={`t-${cell.index}`} layout={layout} cell={cell} occupied={occupied} />
       ))}
       {layout.homes.flat().map((cell) => (
         <FlatDisc
@@ -90,8 +91,8 @@ function ClassicBoard({
           cx={cell.x}
           cy={cell.y}
           r={cell.size * 0.46}
-          fill={themeFor(cell.seat).hex}
-          ring="#ffffff"
+          fill={occupied.has(cell.seat) ? themeFor(cell.seat).hex : "#ffffff"}
+          ring={occupied.has(cell.seat) ? "#ffffff" : "#d5e8f4"}
         />
       ))}
     </>
@@ -104,32 +105,36 @@ function ClassicYard({
   players,
   currentSeat,
   nameById,
+  occupied,
 }: {
   layout: BoardLayout;
   yard: YardLayout;
   players: Player[];
   currentSeat: number | null;
   nameById: Map<string, string>;
+  occupied: boolean;
 }) {
   const theme = themeFor(yard.seat);
-  const active = currentSeat === yard.seat;
+  const active = occupied && currentSeat === yard.seat;
   const player = players.find((item) => item.seat === yard.seat);
-  const name = truncate(player ? nameById.get(player.id) || theme.label : theme.label, 12);
+  const name = truncate(player ? nameById.get(player.id) || theme.label : "", 12);
   return (
     <g>
-      <polygon points={pts(yard.polygon)} fill={theme.hex} stroke={active ? "#fff6c8" : "#ffffff"} strokeWidth={active ? 6 : 3} />
+      <polygon points={pts(yard.polygon)} fill={occupied ? theme.hex : "#c5d5e2"} stroke={active ? "#fff6c8" : "#ffffff"} strokeWidth={active ? 6 : 3} />
       {yard.slots.map((slot, index) => (
-        <FlatDisc key={index} cx={slot.x} cy={slot.y} r={layout.cellSize * 0.5} fill="#ffffff" ring={theme.deep} />
+        <FlatDisc key={index} cx={slot.x} cy={slot.y} r={layout.cellSize * 0.5} fill="#ffffff" ring={occupied ? theme.deep : "#b7c9d6"} />
       ))}
-      <text x={fmt(yard.label.x)} y={fmt(yard.label.y)} textAnchor="middle" className="board-name" fill={theme.ink} fontSize={22}>
-        {name}
-      </text>
+      {occupied ? (
+        <text x={fmt(yard.label.x)} y={fmt(yard.label.y)} textAnchor="middle" className="board-name" fill={theme.ink} fontSize={22}>
+          {name}
+        </text>
+      ) : null}
     </g>
   );
 }
 
-function TrackStone({ layout, cell }: { layout: BoardLayout; cell: TrackCell }) {
-  const start = cell.startFor != null ? themeFor(cell.startFor) : null;
+function TrackStone({ layout, cell, occupied }: { layout: BoardLayout; cell: TrackCell; occupied: Set<number> }) {
+  const start = cell.startFor != null && occupied.has(cell.startFor) ? themeFor(cell.startFor) : null;
   const next = nextTrackPoint(layout, cell.index);
   const angle = (Math.atan2(next.y - cell.y, next.x - cell.x) * 180) / Math.PI;
   const r = cell.size * 0.46;
@@ -147,7 +152,7 @@ function TrackStone({ layout, cell }: { layout: BoardLayout; cell: TrackCell }) 
   );
 }
 
-function CenterDiamond({ layout }: { layout: BoardLayout }) {
+function CenterDiamond({ layout, occupied }: { layout: BoardLayout; occupied: Set<number> }) {
   const { x: cx, y: cy } = layout.center;
   const r = layout.cellSize * 0.7;
   const tl = { x: cx - r, y: cy - r };
@@ -164,7 +169,7 @@ function CenterDiamond({ layout }: { layout: BoardLayout }) {
   return (
     <g>
       {slices.map((slice) => (
-        <polygon key={slice.seat} points={pts(slice.points)} fill={themeFor(slice.seat).hex} stroke="#ffffff" strokeWidth={3} />
+        <polygon key={slice.seat} points={pts(slice.points)} fill={occupied.has(slice.seat) ? themeFor(slice.seat).hex : "#d5e6f2"} stroke="#ffffff" strokeWidth={3} />
       ))}
     </g>
   );
@@ -181,6 +186,7 @@ function RadialBoard({
   currentSeat: number | null;
   nameById: Map<string, string>;
 }) {
+  const occupied = new Set(players.map((player) => player.seat));
   return (
     <>
       <polygon points={pts(layout.outline)} fill="#8ecff2" stroke="#f7fcff" strokeWidth={8} />
@@ -200,7 +206,7 @@ function RadialBoard({
         );
       })}
       {layout.track.map((cell) => (
-        <TrackStone key={`t-${cell.index}`} layout={layout} cell={cell} />
+        <TrackStone key={`t-${cell.index}`} layout={layout} cell={cell} occupied={occupied} />
       ))}
       {layout.homes.flat().map((cell) => (
         <FlatDisc

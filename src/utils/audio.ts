@@ -7,6 +7,7 @@ export interface Soundboard {
   step: () => void;
   capture: () => void;
   six: () => void;
+  arrive: () => void;
   win: () => void;
   click: () => void;
 }
@@ -90,6 +91,9 @@ export function createSoundboard(): Soundboard {
     },
     six: () => {
       [523, 659, 784].forEach((freq, i) => tone(freq, 0.12, "triangle", 0.06, undefined, i * 0.07));
+    },
+    arrive: () => {
+      [392, 523, 659, 784, 1046].forEach((freq, i) => tone(freq, 0.16, "triangle", 0.07, undefined, i * 0.09));
     },
     win: () => {
       [523, 659, 784, 1046].forEach((freq, i) => tone(freq, 0.22, "triangle", 0.07, undefined, i * 0.12));

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bot, Dices, Link2, Users } from "lucide-react";
 import type { PlayerCount, SeatSetup } from "@/types/game";
-import { buildLayout } from "@/utils/boardGeometry";
+import { buildLayout, seatPlan } from "@/utils/boardGeometry";
 import { faDigits, PLAYER_THEMES, themeFor } from "@/utils/palette";
 import { LudoBoard } from "@/components/LudoBoard";
 
@@ -17,7 +17,7 @@ interface LobbyProps {
   onJoin: (code: string, name: string) => void;
 }
 
-const COUNTS: PlayerCount[] = [4, 5, 6];
+const COUNTS: PlayerCount[] = [2, 3, 4, 5, 6];
 const NAME_KEY = "manch-name";
 
 export function Lobby({ initialRoom = "", busy, error, onDismissError, onLocal, onCreate, onJoin }: LobbyProps) {
@@ -45,28 +45,32 @@ export function Lobby({ initialRoom = "", busy, error, onDismissError, onLocal, 
     })),
   );
 
+  const plan = useMemo(() => seatPlan(count), [count]);
   const layout = useMemo(() => buildLayout(count), [count]);
   const previewTokens = useMemo(
     () =>
-      Array.from({ length: count }, (_, seat) =>
-        Array.from({ length: 4 }, (__, index) => ({
+      plan.flatMap((seat) =>
+        Array.from({ length: 4 }, (_, index) => ({
           id: `preview-${seat}-${index}`,
           playerId: PLAYER_THEMES[seat].id,
           seat,
           index,
           progress: -1,
         })),
-      ).flat(),
-    [count],
+      ),
+    [plan],
   );
-  const previewPlayers = PLAYER_THEMES.slice(0, count).map((theme, seat) => ({
-    id: theme.id,
-    name: seat === 0 ? name.trim() || "شما" : seats[seat]?.kind === "human" ? seats[seat].name || `بازیکن ${seat + 1}` : seats[seat]?.name || theme.label,
-    seat,
-    kind: seat === 0 ? ("human" as const) : (seats[seat]?.kind ?? "bot"),
-    peerId: null,
-    connected: true,
-  }));
+  const previewPlayers = plan.map((seat, index) => {
+    const theme = PLAYER_THEMES[seat];
+    return {
+      id: theme.id,
+      name: index === 0 ? name.trim() || "شما" : seats[index]?.kind === "human" ? seats[index].name || `بازیکن ${index + 1}` : seats[index]?.name || theme.label,
+      seat,
+      kind: index === 0 ? ("human" as const) : (seats[index]?.kind ?? "bot"),
+      peerId: null,
+      connected: true,
+    };
+  });
 
   const trimmed = name.trim();
 
@@ -101,7 +105,7 @@ export function Lobby({ initialRoom = "", busy, error, onDismissError, onLocal, 
 
         {panel === "play" ? (
           <>
-            <div className="mt-4 grid grid-cols-3 gap-2">
+            <div className="mt-4 grid grid-cols-5 gap-2">
               {COUNTS.map((value) => (
                 <button key={value} type="button" className={`count-btn ${count === value ? "count-on" : ""}`} onClick={() => setCount(value)}>
                   {faDigits(value)}
@@ -109,8 +113,9 @@ export function Lobby({ initialRoom = "", busy, error, onDismissError, onLocal, 
               ))}
             </div>
             <ul className="mt-4 space-y-2">
-              {seats.slice(0, count).map((seat, index) => {
-                const theme = themeFor(index);
+              {plan.map((boardSeat, index) => {
+                const seat = seats[index];
+                const theme = themeFor(boardSeat);
                 return (
                   <li key={theme.id} className="flex items-center gap-2 rounded-2xl bg-[#f4f9fd] px-2 py-1">
                     <span className="h-7 w-7 shrink-0 rounded-full" style={{ background: theme.hex }} />

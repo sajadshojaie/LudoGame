@@ -1,4 +1,4 @@
-export type PlayerCount = 4 | 5 | 6;
+export type PlayerCount = 2 | 3 | 4 | 5 | 6;
 
 export type MatchStatus = "lobby" | "playing" | "finished";
 
@@ -54,6 +54,8 @@ export interface GameState {
   players: Player[];
   tokens: Token[];
   currentPlayerIndex: number;
+  /** Seat index of the player who rolled the dice currently on the table. */
+  rollerIndex: number;
   dice: number | null;
   rollId: number;
   phase: TurnPhase;

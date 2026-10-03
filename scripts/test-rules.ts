@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { buildLayout, finishProgress, minCenterDistance, trackLength } from "../src/utils/boardGeometry.ts";
+import { buildLayout, finishProgress, homeLength, minCenterDistance, seatPlan, trackLength } from "../src/utils/boardGeometry.ts";
 import {
+  addBot,
   applyMove,
   applyRoll,
   createLocalMatch,
@@ -33,6 +34,14 @@ for (let i = 0; i < classicCells.length; i++) {
   assert.equal(adjacent(classicCells[i], next), true, `classic step ${i} is not orthogonal`);
 }
 
+assert.equal(trackLength(2), 56);
+assert.equal(trackLength(3), 56);
+assert.equal(homeLength(2), 6);
+assert.deepEqual(seatPlan(2), [0, 2]);
+assert.deepEqual(seatPlan(3), [0, 1, 2]);
+assert.equal(buildLayout(2).track.length, 56);
+assert.equal(buildLayout(3).homes.length, 4);
+
 for (const count of [4, 5, 6] as PlayerCount[]) {
   const layout = buildLayout(count);
   assert.equal(layout.track.length, trackLength(count));
@@ -52,6 +61,13 @@ for (const count of [4, 5, 6] as PlayerCount[]) {
   for (const seat of layout.starts) {
     assert.ok(layout.track[seat].startFor != null);
   }
+}
+
+{
+  const match = fresh(2);
+  assert.equal(match.players.length, 2);
+  assert.deepEqual(match.players.map((player) => player.seat), [0, 2]);
+  assert.equal(match.maxPlayers, 2);
 }
 
 function fresh(count: PlayerCount = 4) {
@@ -96,6 +112,7 @@ function fresh(count: PlayerCount = 4) {
   state = applyRoll(state, 3, 0);
   assert.equal(state.dice, 3);
   assert.equal(state.phase, "roll");
+  assert.equal(state.rollerIndex, before);
   assert.notEqual(state.currentPlayerIndex, before);
   assert.equal(legalMoves(state).length, 0);
 }
@@ -252,6 +269,18 @@ function fresh(count: PlayerCount = 4) {
   assert.equal(started.status, "playing");
   assert.equal(started.tokens.length, 8);
   assert.equal(started.maxPlayers, 6);
+  assert.deepEqual(started.players.map((player) => player.seat), [0, 1]);
+}
+
+{
+  const lobby = createLobby({ roomId: "PAIR", hostId: "host", hostName: "Rose", count: 2, peerId: "host" });
+  const withBot = addBot(lobby);
+  const started = startMatch(withBot, 0);
+  assert.deepEqual(started.players.map((player) => player.seat), [0, 2]);
+  assert.deepEqual(
+    [...new Set(started.tokens.map((token) => token.seat))].sort(),
+    [0, 2],
+  );
 }
 
 console.log("rules ok");

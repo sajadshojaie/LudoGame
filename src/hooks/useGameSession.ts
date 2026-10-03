@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { GameState, Intent, PlayerCount, SeatSetup } from "@/types/game";
 import { chooseBotMove } from "@/utils/bot";
 import { createSoundboard, type Soundboard } from "@/utils/audio";
@@ -14,6 +14,7 @@ import {
   createLobby,
   createLocalMatch,
   hopDuration,
+  isFinishedProgress,
   legalMoves,
   roomCode,
 } from "@/utils/gameRules";
@@ -115,11 +116,18 @@ export function useGameSession(): SessionController {
       const hops = move.to < 0 ? 1 : move.from < 0 ? 1 : Math.max(1, move.to - move.from);
       for (let i = 0; i < hops; i++) window.setTimeout(() => audio?.step(), i * HOP_MS);
       if (move.capturedIds.length) window.setTimeout(() => audio?.capture(), hops * HOP_MS);
+      if (isFinishedProgress(move.to, current.maxPlayers)) {
+        window.setTimeout(() => audio?.arrive(), hopDuration(move.from, move.to));
+      }
     }
     if (current.status === "finished") {
       if (!winPlayed.current) {
         winPlayed.current = true;
-        audio?.win();
+        const wait =
+          current.lastMove && isFinishedProgress(current.lastMove.to, current.maxPlayers)
+            ? hopDuration(current.lastMove.from, current.lastMove.to) + 700
+            : 0;
+        window.setTimeout(() => audio?.win(), wait);
       }
     } else {
       winPlayed.current = false;
@@ -127,7 +135,7 @@ export function useGameSession(): SessionController {
   }, [state]);
 
   const animRef = useRef({ rollId: 0, moveSeq: 0 });
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!state) return;
     let ms = 0;
     let rolled = false;

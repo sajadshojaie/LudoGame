@@ -14,6 +14,7 @@ import {
   TOKENS_PER_PLAYER,
   finishProgress,
   homeLength,
+  seatPlan,
   trackLength,
   buildLayout,
 } from "@/utils/boardGeometry";
@@ -54,10 +55,11 @@ export function createTokens(players: Player[]): Token[] {
 }
 
 export function createLocalMatch(count: PlayerCount, seats: SeatSetup[], hostName: string): GameState {
+  const plan = seatPlan(count);
   const players: Player[] = seats.slice(0, count).map((seat, index) => ({
     id: index === 0 ? "local-you" : createId(seat.kind === "bot" ? "bot" : "local"),
     name: (index === 0 ? hostName : seat.name).trim() || defaultName(index, seat.kind),
-    seat: index,
+    seat: plan[index] ?? index,
     kind: index === 0 ? "human" : seat.kind,
     peerId: null,
     connected: true,
@@ -114,6 +116,7 @@ function baseState(partial: {
     players: partial.players,
     tokens: createTokens(partial.players),
     currentPlayerIndex: 0,
+    rollerIndex: 0,
     dice: null,
     rollId: 0,
     phase: partial.phase,
@@ -133,6 +136,11 @@ function baseState(partial: {
     moveSeq: 0,
     lastMove: null,
   };
+}
+
+function nextOpenSeat(state: GameState): number {
+  const used = new Set(state.players.map((player) => player.seat));
+  return seatPlan(state.maxPlayers).find((seat) => !used.has(seat)) ?? state.players.length;
 }
 
 function defaultName(index: number, kind: "human" | "bot"): string {
@@ -264,6 +272,7 @@ export function applyRoll(state: GameState, value: number, now: number): GameSta
   const sixes = value === 6 ? state.consecutiveSixes + 1 : 0;
   const rolled: GameState = {
     ...state,
+    rollerIndex: state.currentPlayerIndex,
     dice: value,
     rollId: state.rollId + 1,
     consecutiveSixes: sixes,
@@ -384,7 +393,7 @@ export function applyMove(state: GameState, tokenId: string, now: number): GameS
 export function addBot(state: GameState): GameState {
   if (state.status !== "lobby") return state;
   if (state.players.length >= state.maxPlayers) return state;
-  const seat = state.players.length;
+  const seat = nextOpenSeat(state);
   const name = BOT_NAMES.find((candidate) => state.players.every((player) => player.name !== candidate)) ?? `ربات ${seat + 1}`;
   const player: Player = {
     id: createId("bot"),
@@ -408,7 +417,7 @@ export function addHuman(state: GameState, player: Player): GameState | null {
   if (state.status !== "lobby") return null;
   if (state.players.some((item) => item.id === player.id || item.peerId === player.peerId)) return state;
   if (state.players.length >= state.maxPlayers) return null;
-  const seated: Player = { ...player, seat: state.players.length, kind: "human", connected: true };
+  const seated: Player = { ...player, seat: nextOpenSeat(state), kind: "human", connected: true };
   const players = [...state.players, seated];
   return {
     ...state,
@@ -422,7 +431,7 @@ export function addHuman(state: GameState, player: Player): GameState | null {
 export function startMatch(state: GameState, now: number): GameState {
   if (state.status !== "lobby") return state;
   if (state.players.length < 2) return state;
-  const players = state.players.map((player, seat) => ({ ...player, seat }));
+  const players = state.players.map((player) => ({ ...player }));
   return {
     ...state,
     revision: state.revision + 1,
@@ -431,6 +440,7 @@ export function startMatch(state: GameState, now: number): GameState {
     players,
     tokens: createTokens(players),
     currentPlayerIndex: 0,
+    rollerIndex: 0,
     dice: null,
     consecutiveSixes: 0,
     introducedIds: [],
@@ -444,7 +454,7 @@ export function startMatch(state: GameState, now: number): GameState {
 }
 
 export function rematch(state: GameState, now: number): GameState {
-  const players = state.players.map((player, seat) => ({ ...player, seat }));
+  const players = state.players.map((player) => ({ ...player }));
   return {
     ...state,
     revision: state.revision + 1,
@@ -453,6 +463,7 @@ export function rematch(state: GameState, now: number): GameState {
     players,
     tokens: createTokens(players),
     currentPlayerIndex: 0,
+    rollerIndex: 0,
     dice: null,
     rollId: state.rollId + 1,
     consecutiveSixes: 0,

@@ -11,18 +11,26 @@ export const VIEW = 1000;
 export const CENTER = 500;
 export const TOKENS_PER_PLAYER = 4;
 
+/** Corners used on the square board. Two players sit opposite each other. */
+export function seatPlan(count: PlayerCount): number[] {
+  if (count === 2) return [0, 2];
+  if (count === 3) return [0, 1, 2];
+  return Array.from({ length: count }, (_, index) => index);
+}
+
 /** Shared-track cells contributed by each seat. Classic arms are longer. */
 export function trackPerPlayer(count: PlayerCount): number {
-  if (count === 4) return 14;
+  if (count <= 4) return 14;
   if (count === 5) return 7;
   return 6;
 }
 
 export function homeLength(count: PlayerCount): number {
-  return count === 4 ? 6 : 4;
+  return count <= 4 ? 6 : 4;
 }
 
 export function trackLength(count: PlayerCount): number {
+  if (count <= 4) return 56;
   return trackPerPlayer(count) * count;
 }
 
@@ -70,10 +78,11 @@ function snapPoint(point: Point): Point {
 }
 
 export function buildLayout(playerCount: PlayerCount): BoardLayout {
-  return playerCount === 4 ? buildClassic() : buildRadial(playerCount);
+  if (playerCount === 5 || playerCount === 6) return buildRadial(playerCount);
+  return buildClassic(playerCount);
 }
 
-function buildClassic(): BoardLayout {
+function buildClassic(playerCount: PlayerCount): BoardLayout {
   const grid = 15;
   const size = 58;
   const origin = (VIEW - grid * size) / 2;
@@ -147,7 +156,7 @@ function buildClassic(): BoardLayout {
   const centerPt = cell(7, 7);
 
   return {
-    playerCount: 4,
+    playerCount,
     viewBox: VIEW,
     shape: "square",
     trackLength: 56,
