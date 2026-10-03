@@ -283,4 +283,57 @@ function fresh(count: PlayerCount = 4) {
   );
 }
 
+{
+  let state = fresh(4);
+  const layout = buildLayout(4);
+  const red = state.players[0];
+  const green = state.players[1];
+  const landing = (layout.starts[0] + 4) % layout.trackLength;
+  const greenProgress = (landing - layout.starts[1] + layout.trackLength) % layout.trackLength;
+  state = {
+    ...state,
+    phase: "move",
+    dice: 1,
+    tokens: state.tokens.map((token) => {
+      if (token.playerId === red.id && token.index === 0) return { ...token, progress: 3 };
+      if (token.playerId === green.id && token.index <= 1) return { ...token, progress: greenProgress };
+      return token;
+    }),
+  };
+  const redToken = state.tokens.find((token) => token.playerId === red.id && token.index === 0)!;
+  const pile = legalMoves(state).find((move) => move.tokenId === redToken.id);
+  assert.ok(pile);
+  assert.equal(pile!.captures.length, 2);
+  state = applyMove(state, redToken.id, 0);
+  const sentHome = state.tokens.filter((token) => token.playerId === green.id && token.progress < 0);
+  assert.equal(sentHome.length, 4);
+}
+
+{
+  let state = fresh(4);
+  const layout = buildLayout(4);
+  const red = state.players[0];
+  const green = state.players[1];
+  const ahead = (layout.starts[0] + 2) % layout.trackLength;
+  const greenProgress = (ahead - layout.starts[1] + layout.trackLength) % layout.trackLength;
+  state = {
+    ...state,
+    phase: "move",
+    dice: 4,
+    tokens: state.tokens.map((token) => {
+      if (token.playerId === red.id && token.index === 0) return { ...token, progress: 1 };
+      if (token.playerId === green.id && token.index <= 1) return { ...token, progress: greenProgress };
+      return token;
+    }),
+  };
+  const redToken = state.tokens.find((token) => token.playerId === red.id && token.index === 0)!;
+  const move = legalMoves(state).find((item) => item.tokenId === redToken.id);
+  assert.ok(move);
+  assert.equal(move!.to, 5);
+  assert.equal(move!.captures.length, 0);
+  state = applyMove(state, redToken.id, 0);
+  const stillThere = state.tokens.filter((token) => token.playerId === green.id && token.progress === greenProgress);
+  assert.equal(stillThere.length, 2);
+}
+
 console.log("rules ok");

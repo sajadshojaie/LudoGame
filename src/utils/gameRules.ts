@@ -190,19 +190,6 @@ function capturesOn(state: GameState, mover: Token, trackIndex: number, tokens: 
     .map((token) => token.id);
 }
 
-function blocked(state: GameState, mover: Token, trackIndex: number, tokens: Token[]): boolean {
-  const present = tokensOnTrackCell(state, trackIndex, tokens).filter((token) => token.id !== mover.id);
-  const counts = new Map<string, number>();
-  for (const token of present) {
-    if (token.playerId === mover.playerId) continue;
-    counts.set(token.playerId, (counts.get(token.playerId) ?? 0) + 1);
-  }
-  for (const count of counts.values()) {
-    if (count >= 2) return true;
-  }
-  return false;
-}
-
 export function legalMoves(state: GameState, dice = state.dice): LegalMove[] {
   if (state.status !== "playing" || state.phase !== "move" || dice == null) return [];
   const player = state.players[state.currentPlayerIndex];
@@ -218,24 +205,12 @@ export function legalMoves(state: GameState, dice = state.dice): LegalMove[] {
     if (token.progress < 0) {
       if (dice !== 6) continue;
       const index = layoutOf(state.maxPlayers).starts[token.seat];
-      if (blocked(state, token, index, state.tokens)) continue;
       moves.push({ tokenId: token.id, from: -1, to: 0, captures: capturesOn(state, token, index, state.tokens) });
       continue;
     }
 
     const dest = token.progress + dice;
     if (dest > goal) continue;
-
-    let illegal = false;
-    const lastTrack = Math.min(dest, len - 1);
-    for (let step = token.progress + 1; step <= lastTrack; step++) {
-      const index = (layoutOf(state.maxPlayers).starts[token.seat] + step) % len;
-      if (blocked(state, token, index, state.tokens)) {
-        illegal = true;
-        break;
-      }
-    }
-    if (illegal) continue;
 
     const captures: string[] = [];
     if (dest < len) {
