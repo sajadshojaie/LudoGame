@@ -106,8 +106,8 @@ export function useGameSession(): SessionController {
     if (current.rollId !== seenRoll.current) {
       seenRoll.current = current.rollId;
       if (current.dice != null) {
-        if (current.dice === 6) audio?.six();
-        else audio?.dice();
+        audio?.dice();
+        if (current.dice === 6) audio?.six(0.2);
       }
     }
     if (current.lastMove && current.lastMove.id !== seenMove.current) {

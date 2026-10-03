@@ -6,7 +6,7 @@ export interface Soundboard {
   dice: () => void;
   step: () => void;
   capture: () => void;
-  six: () => void;
+  six: (delay?: number) => void;
   arrive: () => void;
   win: () => void;
   click: () => void;
@@ -89,8 +89,8 @@ export function createSoundboard(): Soundboard {
       tone(220, 0.22, "sawtooth", 0.05, 70);
       tone(140, 0.18, "square", 0.03, 60, 0.02);
     },
-    six: () => {
-      [523, 659, 784].forEach((freq, i) => tone(freq, 0.12, "triangle", 0.06, undefined, i * 0.07));
+    six: (delay = 0) => {
+      [523, 659, 784].forEach((freq, i) => tone(freq, 0.12, "triangle", 0.06, undefined, delay + i * 0.07));
     },
     arrive: () => {
       [392, 523, 659, 784, 1046].forEach((freq, i) => tone(freq, 0.16, "triangle", 0.07, undefined, i * 0.09));

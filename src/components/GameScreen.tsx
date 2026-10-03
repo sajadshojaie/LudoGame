@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BookOpen, Bot, Copy, Check, LogOut, RotateCcw, UserPlus, Volume2, VolumeX } from "lucide-react";
 import type { GameState, Intent } from "@/types/game";
 import { buildLayout } from "@/utils/boardGeometry";
@@ -59,6 +59,16 @@ export function GameScreen(props: GameScreenProps) {
   }
 
   const playing = state.status !== "lobby";
+
+  useEffect(() => {
+    if (state.status !== "playing") return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [state.status]);
 
   return (
     <div className="flex h-dvh min-w-0 flex-col overflow-hidden lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[auto_minmax(0,1fr)]">
