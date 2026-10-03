@@ -8,8 +8,8 @@ const vazir = Vazirmatn({
 });
 
 export const metadata: Metadata = {
-  title: "منچ بازی",
-  description: "منچ چندنفره برای چهار، پنج یا شش بازیکن. اتاق همتابه‌همتا، بدون سرور بازی.",
+  title: "منچ بازی آنلاین",
+  description: "منچ چندنفره آنلاین بدون نیاز به سرور! همه چیز سمت کلاینت هندل میشود.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
