@@ -58,6 +58,10 @@ export interface GameState {
   rollId: number;
   phase: TurnPhase;
   consecutiveSixes: number;
+  /** Players who have already brought a token out of the yard. */
+  introducedIds: string[];
+  /** Failed yard rolls per player, before their first token comes out. */
+  openingMisses: Record<string, number>;
   rankings: string[];
   log: LogEntry[];
   busyUntil: number;

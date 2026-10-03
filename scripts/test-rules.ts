@@ -5,6 +5,8 @@ import {
   applyRoll,
   createLocalMatch,
   legalMoves,
+  needsOpeningSix,
+  openingFaceCount,
   startMatch,
   createLobby,
 } from "../src/utils/gameRules.ts";
@@ -58,6 +60,34 @@ function fresh(count: PlayerCount = 4) {
     Array.from({ length: count }, (_, index) => ({ name: `P${index}`, kind: index === 0 ? "human" : "bot" })),
     "Rose",
   );
+}
+
+{
+  let state = fresh();
+  assert.equal(needsOpeningSix(state), true);
+  state = applyRoll(state, 6, 0);
+  state = applyMove(state, legalMoves(state)[0].tokenId, 0);
+  assert.equal(needsOpeningSix(state), false);
+  const home = state.tokens.filter((token) => token.playerId === state.players[0].id && token.progress < 0);
+  assert.equal(home.length, 3);
+  state = { ...state, currentPlayerIndex: 1 };
+  assert.equal(needsOpeningSix(state), true);
+  assert.equal(openingFaceCount(0), 6);
+  assert.equal(openingFaceCount(1), 6);
+  assert.equal(openingFaceCount(2), 7);
+}
+
+{
+  let state = fresh();
+  const id = state.players[0].id;
+  state = applyRoll(state, 2, 0);
+  assert.equal(state.openingMisses[id], 1);
+  state = { ...state, currentPlayerIndex: 0, phase: "roll", busyUntil: 0 };
+  state = applyRoll(state, 4, 0);
+  assert.equal(state.openingMisses[id], 2);
+  state = { ...state, currentPlayerIndex: 0, phase: "roll", busyUntil: 0 };
+  state = applyRoll(state, 6, 0);
+  assert.equal(state.openingMisses[id], 2);
 }
 
 {

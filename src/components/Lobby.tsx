@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bot, Dices, Link2, Users } from "lucide-react";
 import type { PlayerCount, SeatSetup } from "@/types/game";
 import { buildLayout } from "@/utils/boardGeometry";
@@ -18,10 +18,24 @@ interface LobbyProps {
 }
 
 const COUNTS: PlayerCount[] = [4, 5, 6];
+const NAME_KEY = "manch-name";
 
 export function Lobby({ initialRoom = "", busy, error, onDismissError, onLocal, onCreate, onJoin }: LobbyProps) {
   const [count, setCount] = useState<PlayerCount>(4);
   const [name, setName] = useState("");
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem(NAME_KEY);
+    if (saved) setName(saved.slice(0, 18));
+  }, []);
+
+  function rememberName(value: string) {
+    const next = value.slice(0, 18);
+    const trimmed = next.trim();
+    setName(next);
+    if (trimmed) window.localStorage.setItem(NAME_KEY, trimmed);
+    else window.localStorage.removeItem(NAME_KEY);
+  }
   const [code, setCode] = useState(initialRoom);
   const [panel, setPanel] = useState<"play" | "join">(initialRoom ? "join" : "play");
   const [seats, setSeats] = useState<SeatSetup[]>(() =>
@@ -82,7 +96,7 @@ export function Lobby({ initialRoom = "", busy, error, onDismissError, onLocal, 
           value={name}
           placeholder="نام شما"
           aria-label="نام شما"
-          onChange={(event) => setName(event.target.value)}
+          onChange={(event) => rememberName(event.target.value)}
         />
 
         {panel === "play" ? (

@@ -118,6 +118,8 @@ function baseState(partial: {
     rollId: 0,
     phase: partial.phase,
     consecutiveSixes: 0,
+    introducedIds: [],
+    openingMisses: {},
     rankings: [],
     log: [
       entry(
@@ -265,6 +267,7 @@ export function applyRoll(state: GameState, value: number, now: number): GameSta
     dice: value,
     rollId: state.rollId + 1,
     consecutiveSixes: sixes,
+    openingMisses: noteOpeningMiss(state, value),
     revision: state.revision + 1,
   };
 
@@ -351,10 +354,16 @@ export function applyMove(state: GameState, tokenId: string, now: number): GameS
     capturedIds: move.captures,
   };
 
+  const introducedIds =
+    move.from < 0 && !(state.introducedIds ?? []).includes(player.id)
+      ? [...(state.introducedIds ?? []), player.id]
+      : (state.introducedIds ?? []);
+
   return {
     ...state,
     revision: state.revision + 1,
     tokens,
+    introducedIds,
     rankings,
     status,
     phase: status === "finished" ? "roll" : "roll",
@@ -424,6 +433,8 @@ export function startMatch(state: GameState, now: number): GameState {
     currentPlayerIndex: 0,
     dice: null,
     consecutiveSixes: 0,
+    introducedIds: [],
+    openingMisses: {},
     rankings: [],
     busyUntil: now + 400,
     moveSeq: 0,
@@ -445,6 +456,8 @@ export function rematch(state: GameState, now: number): GameState {
     dice: null,
     rollId: state.rollId + 1,
     consecutiveSixes: 0,
+    introducedIds: [],
+    openingMisses: {},
     rankings: [],
     busyUntil: now + 400,
     moveSeq: state.moveSeq + 1,
@@ -492,7 +505,7 @@ export function applyIntent(state: GameState, intent: Intent, actorId: string, n
   if (!actorIsCurrent) return null;
   if (intent.type === "roll") {
     if (state.phase !== "roll") return null;
-    return applyRoll(state, rollDie(), now);
+    return applyRoll(state, rollForTurn(state), now);
   }
   if (intent.type === "move") {
     const next = applyMove(state, intent.tokenId, now);
@@ -501,17 +514,57 @@ export function applyIntent(state: GameState, intent: Intent, actorId: string, n
   return null;
 }
 
+/**
+ * True until this player has brought one token out of the yard.
+ * Later sixes, including bringing out the other tokens, stay fair.
+ */
+export function needsOpeningSix(state: GameState): boolean {
+  const player = state.players[state.currentPlayerIndex];
+  if (!player) return false;
+  if ((state.introducedIds ?? []).includes(player.id)) return false;
+  return state.tokens.some((token) => token.playerId === player.id && token.progress < 0);
+}
+
 /** Each face from 1 to 6 is equally likely. Rejection sampling removes modulo bias. */
 export function rollDie(): number {
+  return rollIndex(6) + 1;
+}
+
+/**
+ * The first two tries to leave the yard use a fair die.
+ * After two misses, 6 is one extra face in seven, still well short of a sure six.
+ */
+export function openingFaceCount(misses: number): number {
+  return misses < 2 ? 6 : 7;
+}
+
+function rollForTurn(state: GameState): number {
+  if (!needsOpeningSix(state)) return rollDie();
+  const player = state.players[state.currentPlayerIndex];
+  const misses = state.openingMisses?.[player.id] ?? 0;
+  if (openingFaceCount(misses) === 6) return rollDie();
+  const faces = [1, 2, 3, 4, 5, 6, 6];
+  return faces[rollIndex(faces.length)];
+}
+
+function noteOpeningMiss(state: GameState, value: number): Record<string, number> {
+  const misses = { ...(state.openingMisses ?? {}) };
+  if (value === 6 || !needsOpeningSix(state)) return misses;
+  const player = state.players[state.currentPlayerIndex];
+  misses[player.id] = (misses[player.id] ?? 0) + 1;
+  return misses;
+}
+
+function rollIndex(spanCount: number): number {
   const bucket = new Uint32Array(1);
   const span = 0x1_0000_0000;
-  const limit = span - (span % 6);
+  const limit = span - (span % spanCount);
   let pick = 0;
   do {
     crypto.getRandomValues(bucket);
     pick = bucket[0];
   } while (pick >= limit);
-  return (pick % 6) + 1;
+  return pick % spanCount;
 }
 
 export function describeMove(state: GameState, token: Token): string {

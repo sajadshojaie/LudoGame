@@ -62,6 +62,7 @@ export function useGameSession(): SessionController {
   const seenMove = useRef(0);
   const winPlayed = useRef(false);
   const readyRef = useRef(false);
+  const joinHelloRef = useRef<{ playerId: string; name: string } | null>(null);
 
   const commit = useCallback((next: GameState | null) => {
     stateRef.current = next;
@@ -71,6 +72,26 @@ export function useGameSession(): SessionController {
   const publish = useCallback((next: GameState, target?: string) => {
     connRef.current?.send({ kind: "state", state: next }, target);
   }, []);
+
+  const announceSelf = useCallback((target?: string) => {
+    const hello = joinHelloRef.current;
+    if (!hello || hostRef.current) return;
+    connRef.current?.send({ kind: "hello", playerId: hello.playerId, name: hello.name }, target);
+  }, []);
+
+  useEffect(() => {
+    if (!online || isHost) return;
+    const timer = window.setInterval(() => {
+      const hello = joinHelloRef.current;
+      const view = stateRef.current;
+      if (!hello) return;
+      if (view && (view.status !== "lobby" || view.players.some((player) => player.id === hello.playerId || player.peerId === myIdRef.current))) {
+        return;
+      }
+      announceSelf();
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [announceSelf, isHost, online]);
 
   useEffect(() => {
     audioRef.current = createSoundboard();
@@ -212,6 +233,15 @@ export function useGameSession(): SessionController {
           commit(message.state);
           setWaiting(false);
         }
+        const hello = joinHelloRef.current;
+        const view = stateRef.current;
+        if (
+          hello &&
+          view?.status === "lobby" &&
+          !view.players.some((player) => player.id === hello.playerId || player.peerId === myIdRef.current)
+        ) {
+          announceSelf(peerId);
+        }
         return;
       }
       if (message.kind === "intent" && hostRef.current) {
@@ -219,10 +249,11 @@ export function useGameSession(): SessionController {
         return;
       }
       if (message.kind === "reject" && !hostRef.current) {
+        joinHelloRef.current = null;
         setError(message.reason);
       }
     },
-    [commit, hostApply, publish],
+    [announceSelf, commit, hostApply, publish],
   );
 
   const handleLeavePeer = useCallback(
@@ -271,8 +302,12 @@ export function useGameSession(): SessionController {
       const earlyPeers: string[] = [];
       const connection = await connectRoom(code, {
         onPeerJoin: (peerId) => {
-          if (!readyRef.current) earlyPeers.push(peerId);
-          else if (hostRef.current && stateRef.current) publish(stateRef.current, peerId);
+          if (!readyRef.current) {
+            earlyPeers.push(peerId);
+            return;
+          }
+          if (hostRef.current && stateRef.current) publish(stateRef.current, peerId);
+          else announceSelf(peerId);
         },
         onPeerLeave: (peerId) => {
           if (readyRef.current) leavePeerRef.current(peerId);
@@ -291,14 +326,16 @@ export function useGameSession(): SessionController {
         connection,
         flush: () => {
           readyRef.current = true;
-          for (const peerId of earlyPeers) {
-            if (hostRef.current && stateRef.current) publish(stateRef.current, peerId);
-          }
           for (const item of early) wireRef.current(item.message, item.peerId);
+          const peers = new Set<string>([...earlyPeers, ...connection.peerIds()]);
+          for (const peerId of peers) {
+            if (hostRef.current && stateRef.current) publish(stateRef.current, peerId);
+            else announceSelf(peerId);
+          }
         },
       };
     },
-    [publish],
+    [announceSelf, publish],
   );
 
   const leave = useCallback(() => {
@@ -306,6 +343,7 @@ export function useGameSession(): SessionController {
     connRef.current = null;
     hostRef.current = false;
     myIdRef.current = null;
+    joinHelloRef.current = null;
     readyRef.current = false;
     setOnline(false);
     setIsHost(false);
@@ -341,6 +379,7 @@ export function useGameSession(): SessionController {
       setError(null);
       setWaiting(true);
       setOnline(true);
+      joinHelloRef.current = null;
       const code = roomCode();
       try {
         const { connection, flush } = await openRoom(code);
@@ -385,8 +424,11 @@ export function useGameSession(): SessionController {
         const { connection, flush } = await openRoom(clean);
         myIdRef.current = connection.selfId;
         setMyId(connection.selfId);
+        joinHelloRef.current = {
+          playerId: connection.selfId,
+          name: name.trim().slice(0, 18) || "مهمان",
+        };
         flush();
-        connection.send({ kind: "hello", playerId: connection.selfId, name: name.trim().slice(0, 18) || "مهمان" });
         window.history.replaceState(null, "", `${window.location.pathname}?room=${clean}`);
         window.setTimeout(() => {
           if (!stateRef.current) {

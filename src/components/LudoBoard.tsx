@@ -329,7 +329,9 @@ function TokenSprite({
   }, [holdMs, layout, moveSeq, offset.dx, offset.dy, target.x, target.y, token]);
 
   const theme = themeFor(token.seat);
-  const size = layout.cellSize * 0.62;
+  const parked = token.progress < 0;
+  const yardDiameter = layout.shape === "polygon" ? 0.68 : 1;
+  const size = layout.cellSize * (parked ? yardDiameter * 0.86 : 0.58);
 
   return (
     <button
@@ -350,13 +352,13 @@ function TokenSprite({
       {token.progress === 0 ? <span className="token-pad" /> : null}
       {legal ? <span className="token-ring" /> : null}
       <span className="token-rot" style={{ transform: `rotate(${pose.heading}deg)` }}>
-        <Airplane color={theme.hex} deep={theme.deep} />
+        <Airplane color={theme.hex} deep={theme.deep} soft={theme.soft} />
       </span>
     </button>
   );
 }
 
-function Airplane({ color, deep }: { color: string; deep: string }) {
+function Airplane({ color, deep, soft }: { color: string; deep: string; soft: string }) {
   const body = "M32 2.5 37.2 24.5 58 33.2 58 39.2 37.4 36.4 35.2 50.5 43.5 56.2 43.5 60.4 32 56.4 20.5 60.4 20.5 56.2 28.8 50.5 26.6 36.4 6 39.2 6 33.2 26.8 24.5Z";
   return (
     <svg viewBox="0 0 64 64" className="token-plane" aria-hidden>
@@ -402,10 +404,8 @@ function cellKey(layout: BoardLayout, token: Token): string {
 
 function idleHeading(layout: BoardLayout, token: Token): number {
   if (token.progress < 0) {
-    const slot = layout.yards[token.seat]?.slots[token.index];
-    const hub = centroid(layout.yards[token.seat]?.slots ?? []);
-    if (!slot) return 0;
-    return headingFrom(hub, slot, 0);
+    const yard = centroid(layout.yards[token.seat]?.polygon ?? []);
+    return headingFrom(yard, layout.center, 0);
   }
   if (token.progress >= layout.trackLength + layout.homeLength) {
     const yard = centroid(layout.yards[token.seat]?.polygon ?? []);
