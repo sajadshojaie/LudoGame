@@ -58,12 +58,14 @@ export function GameScreen(props: GameScreenProps) {
     }
   }
 
+  const playing = state.status !== "lobby";
+
   return (
-    <div className="grid h-dvh min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[auto_minmax(0,1fr)]">
-      <header className="flex items-center justify-between gap-3 border-b border-[#14324f]/10 px-4 py-3 lg:col-span-2">
-        <div>
-          <p className="font-display text-2xl leading-none text-[#14324f]">منچ بازی</p>
-          <p className="text-xs text-[#5a7e99]">
+    <div className="flex h-dvh min-w-0 flex-col overflow-hidden lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[auto_minmax(0,1fr)]">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[#14324f]/10 px-3 py-2 lg:col-span-2 lg:px-4 lg:py-3">
+        <div className="min-w-0">
+          <p className="font-display text-xl leading-none text-[#14324f] lg:text-2xl">منچ بازی</p>
+          <p className="truncate text-xs text-[#5a7e99]">
             {faDigits(state.maxPlayers)} نفره · {props.online ? `اتاق ${state.roomId}` : "روی همین دستگاه"}
             {props.online ? ` · ${props.syncStatus === "live" ? "زنده" : "در حال اتصال"}` : ""}
           </p>
@@ -86,8 +88,9 @@ export function GameScreen(props: GameScreenProps) {
         </div>
       </header>
 
-      <div className="flex min-h-0 min-w-0 flex-col px-3 py-3 lg:px-6">
-        <div className="board-slot min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-center lg:contents">
+      <div className={`${playing ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 w-full flex-col px-2 py-1 lg:flex-1 lg:px-6 lg:py-3`}>
+        <div className="board-slot min-h-0 w-full lg:flex-1">
           <div className="board-fit">
             <LudoBoard
               layout={layout}
@@ -102,26 +105,38 @@ export function GameScreen(props: GameScreenProps) {
         </div>
       </div>
 
-      <aside className="flex max-h-[46dvh] min-h-0 flex-col overflow-y-auto border-t border-[#14324f]/10 bg-white/60 p-4 lg:max-h-none lg:border-r lg:border-t-0 lg:p-6">
+      <aside
+        className={`flex min-h-0 flex-col border-[#14324f]/10 bg-white/75 lg:border-r lg:border-t-0 lg:bg-white/60 lg:p-6 ${
+          playing
+            ? "shrink-0 overflow-x-hidden border-t px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:overflow-y-auto"
+            : "flex-1 overflow-y-auto border-t p-4 lg:flex-none"
+        }`}
+      >
         {state.status === "lobby" ? (
           <div className="m-auto w-full max-w-sm">
             <LobbyPanel {...props} />
           </div>
         ) : (
-          <div className="flex w-full flex-col gap-6 lg:h-full lg:justify-between">
-            <TurnCard name={displayed?.name ?? "منچ بازی"} seat={displayed?.seat ?? 0} />
-            {state.lastMove && isFinishedProgress(state.lastMove.to, state.maxPlayers) ? (
-              <ArriveNote state={state} />
-            ) : null}
-            <div className="flex items-center justify-center lg:flex-1">
-              <Dice value={state.dice} rolling={props.diceRolling} enabled={canRoll} label="" onRoll={() => props.onAct({ type: "roll" })} />
+          <div className="flex w-full flex-col gap-2 lg:h-full lg:justify-between lg:gap-6">
+            <div className="flex items-center gap-2 lg:contents">
+              <div className="min-w-0 flex-1 lg:contents">
+                <TurnCard name={displayed?.name ?? "منچ بازی"} seat={displayed?.seat ?? 0} />
+              </div>
+              <div className="dice-dock lg:order-2 lg:flex lg:flex-1 lg:items-center">
+                <Dice value={state.dice} rolling={props.diceRolling} enabled={canRoll} label="" onRoll={() => props.onAct({ type: "roll" })} />
+              </div>
             </div>
-            <div className="flex flex-col gap-2">
+            {state.lastMove && isFinishedProgress(state.lastMove.to, state.maxPlayers) ? (
+              <div className="lg:order-1">
+                <ArriveNote state={state} />
+              </div>
+            ) : null}
+            <div className="flex max-w-full gap-1.5 overflow-x-auto pb-1 lg:order-3 lg:w-full lg:flex-col lg:gap-2 lg:overflow-visible lg:pb-0">
               {state.players.map((player) => (
                 <SeatCard key={player.id} name={player.name} seat={player.seat} active={displayed?.id === player.id} bot={player.kind === "bot"} place={place(player.id)} />
               ))}
               {state.rankings.length > 0 && (props.isHost || !props.online) ? (
-                <button type="button" className="btn-primary mt-2" onClick={() => props.onAct({ type: "rematch" })}>
+                <button type="button" className="btn-primary mt-2 shrink-0" onClick={() => props.onAct({ type: "rematch" })}>
                   <RotateCcw size={16} /> شروع مجدد
                 </button>
               ) : null}
@@ -129,6 +144,7 @@ export function GameScreen(props: GameScreenProps) {
           </div>
         )}
       </aside>
+      </div>
 
       {rulesOpen ? <Rules onClose={() => setRulesOpen(false)} /> : null}
       {leaveOpen ? (
@@ -220,13 +236,13 @@ function ConfirmLeave({ onStay, onLeave }: { onStay: () => void; onLeave: () => 
 function TurnCard({ name, seat }: { name: string; seat: number }) {
   const theme = themeFor(seat);
   return (
-    <div className="flex items-center gap-4 rounded-[1.8rem] bg-white px-5 py-5 shadow-sm" style={{ borderRight: `10px solid ${theme.hex}` }}>
-      <span className="grid h-20 w-20 shrink-0 place-items-center rounded-3xl text-4xl font-extrabold text-white shadow-inner" style={{ background: theme.hex }}>
+    <div className="flex w-full min-w-0 items-center gap-2 rounded-2xl bg-white px-3 py-2 shadow-sm lg:gap-4 lg:rounded-[1.8rem] lg:px-5 lg:py-5" style={{ borderRight: `8px solid ${theme.hex}` }}>
+      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-xl font-extrabold text-white shadow-inner lg:h-20 lg:w-20 lg:rounded-3xl lg:text-4xl" style={{ background: theme.hex }}>
         {name.trim().slice(0, 1)}
       </span>
       <div className="min-w-0">
-        <p className="text-sm font-semibold text-[#5a7e99]">نوبت</p>
-        <p className="truncate text-4xl font-extrabold leading-tight text-[#14324f]">{name}</p>
+        <p className="text-xs font-semibold text-[#5a7e99] lg:text-sm">نوبت</p>
+        <p className="truncate text-xl font-extrabold leading-tight text-[#14324f] lg:text-4xl">{name}</p>
       </div>
     </div>
   );
@@ -254,11 +270,11 @@ function SeatCard({
   const theme = themeFor(seat);
   return (
     <div
-      className={`flex items-center gap-2 rounded-2xl px-3 py-3 ${active ? "bg-white shadow-sm" : "bg-white/70"}`}
+      className={`flex shrink-0 items-center gap-1.5 rounded-2xl px-2 py-1.5 lg:w-full lg:gap-2 lg:px-3 lg:py-3 ${active ? "bg-white shadow-sm" : "bg-white/70"}`}
       style={active ? { outline: `2px solid ${theme.hex}` } : undefined}
     >
       <span className="h-4 w-4 shrink-0 rounded-full" style={{ background: theme.hex }} />
-      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#14324f]">{name}</span>
+      <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#14324f] lg:text-sm">{name}</span>
       {bot && !place ? <Bot size={14} className="shrink-0 text-[#7f9aaf]" /> : null}
       {place ? <span className={`shrink-0 text-xs font-bold ${place === 1 ? "text-amber-600" : "text-[#5a7e99]"}`}>{placeLabel(place)}</span> : null}
     </div>
