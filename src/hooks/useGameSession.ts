@@ -20,7 +20,9 @@ import {
 } from "@/utils/gameRules";
 import {
   connectRoom,
+  RoomBusyError,
   type RoomConnection,
+  type RoomRole,
   type SyncStatus,
   type WireMessage,
 } from "@/utils/syncService";
@@ -87,6 +89,14 @@ export function useGameSession(): SessionController {
       target,
     );
   }, []);
+
+  useEffect(() => {
+    const connection = connRef.current;
+    if (!online || !state || !connection) return;
+    for (const player of state.players) {
+      if (player.kind === "human" && player.peerId) connection.ensurePeer(player.peerId);
+    }
+  }, [online, state]);
 
   useEffect(() => {
     if (!online || isHost) return;
@@ -352,7 +362,7 @@ export function useGameSession(): SessionController {
   });
 
   const openRoom = useCallback(
-    async (code: string) => {
+    async (code: string, role: RoomRole) => {
       connRef.current?.leave();
       readyRef.current = false;
       const early: Array<{ message: WireMessage; peerId: string }> = [];
@@ -377,7 +387,7 @@ export function useGameSession(): SessionController {
           setSyncStatus(status);
           setSyncDetail(detail ?? null);
         },
-      });
+      }, role);
       connRef.current = connection;
       return {
         connection,
@@ -437,30 +447,38 @@ export function useGameSession(): SessionController {
       setWaiting(true);
       setOnline(true);
       joinHelloRef.current = null;
-      const code = roomCode();
-      try {
-        const { connection, flush } = await openRoom(code);
-        hostRef.current = true;
-        myIdRef.current = connection.selfId;
-        setIsHost(true);
-        setMyId(connection.selfId);
-        const next = createLobby({
-          roomId: code,
-          hostId: connection.selfId,
-          hostName: name,
-          count,
-          peerId: connection.selfId,
-        });
-        commit(next);
-        flush();
-        setWaiting(false);
-        window.history.replaceState(null, "", `${window.location.pathname}?room=${code}`);
-      } catch (err) {
-        setWaiting(false);
-        setOnline(false);
-        hostRef.current = false;
-        setError(err instanceof Error ? err.message : "اتاق باز نشد.");
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const code = roomCode();
+        try {
+          const { connection, flush } = await openRoom(code, "host");
+          hostRef.current = true;
+          myIdRef.current = connection.selfId;
+          setIsHost(true);
+          setMyId(connection.selfId);
+          const next = createLobby({
+            roomId: code,
+            hostId: connection.selfId,
+            hostName: name,
+            count,
+            peerId: connection.selfId,
+          });
+          commit(next);
+          flush();
+          setWaiting(false);
+          window.history.replaceState(null, "", `${window.location.pathname}?room=${code}`);
+          return;
+        } catch (err) {
+          lastError = err;
+          connRef.current?.leave();
+          connRef.current = null;
+          if (!(err instanceof RoomBusyError)) break;
+        }
       }
+      setWaiting(false);
+      setOnline(false);
+      hostRef.current = false;
+      setError(lastError instanceof Error ? lastError.message : "اتاق باز نشد.");
     },
     [commit, openRoom],
   );
@@ -478,7 +496,7 @@ export function useGameSession(): SessionController {
       hostRef.current = false;
       setIsHost(false);
       try {
-        const { connection, flush } = await openRoom(clean);
+        const { connection, flush } = await openRoom(clean, "guest");
         myIdRef.current = connection.selfId;
         setMyId(connection.selfId);
         joinHelloRef.current = {
@@ -494,7 +512,7 @@ export function useGameSession(): SessionController {
         window.setTimeout(() => {
           if (!stateRef.current) {
             setSyncDetail(
-              "هنوز میزبان پیدا نشده. همین صفحه را باز نگه دارید تا وصل شود.",
+              "هنوز میزبان پیدا نشده. هر دو صفحه را باز نگه دارید؛ اتصال از اینترنت رد می‌شود و ممکن است کمی طول بکشد.",
             );
           }
         }, 12000);
