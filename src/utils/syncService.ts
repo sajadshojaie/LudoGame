@@ -24,33 +24,13 @@ export interface SyncHandlers {
 
 const APP_ID = "app.manch.ludo.v1";
 
-const TURN_HOST = "staticauth.openrelay.metered.ca";
-const TURN_SECRET = "openrelayprojectsecret";
-
-/** Short-lived TURN login. Coturn checks HMAC-SHA1(secret, username). */
-async function turnLogin(): Promise<{ username: string; credential: string }> {
-  const username = `${Math.floor(Date.now() / 1000) + 12 * 60 * 60}:manch`;
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(TURN_SECRET), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
-  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(username)));
-  const credential = btoa(String.fromCharCode(...mac));
-  return { username, credential };
-}
-
-export async function connectRoom(roomId: string, handlers: SyncHandlers): Promise<RoomConnection> {
+export async function connectRoom(
+  roomId: string,
+  handlers: SyncHandlers,
+): Promise<RoomConnection> {
   handlers.onStatus("connecting", "در حال پیدا کردن بقیه بازیکن‌ها…");
   const { joinRoom, selfId } = await import("trystero");
-  const login = await turnLogin();
-  const room = joinRoom(
-    {
-      appId: APP_ID,
-      relayConfig: { redundancy: 16 },
-      turnConfig: [
-        { urls: `turn:${TURN_HOST}:80?transport=tcp`, ...login },
-        { urls: `turns:${TURN_HOST}:443?transport=tcp`, ...login },
-      ],
-    },
-    roomId.trim().toUpperCase(),
-  );
+  const room = joinRoom({ appId: APP_ID }, roomId.trim().toUpperCase());
   const channel = room.makeAction("manch") as {
     send: (message: WireMessage, options?: { target?: string }) => Promise<void>;
     onMessage: ((message: WireMessage, context: { peerId: string }) => void) | null;

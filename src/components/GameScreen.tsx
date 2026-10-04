@@ -130,7 +130,12 @@ export function GameScreen(props: GameScreenProps) {
           <div className="flex w-full flex-col gap-2 lg:h-full lg:justify-between lg:gap-6">
             <div className="flex items-center gap-2 lg:contents">
               <div className="min-w-0 flex-1 lg:contents">
-                <TurnCard name={displayed?.name ?? "منچ بازی"} seat={displayed?.seat ?? 0} />
+                <TurnCard
+                  name={displayed?.name ?? "منچ بازی"}
+                  seat={displayed?.seat ?? 0}
+                  mine={Boolean(displayed && props.myId && displayed.id === props.myId)}
+                  deadline={state.status === "playing" && state.phase === "roll" && !props.diceRolling ? state.rollDeadline : 0}
+                />
               </div>
               <div className="dice-dock lg:order-2 lg:flex lg:flex-1 lg:items-center">
                 <Dice value={state.dice} rolling={props.diceRolling} enabled={canRoll} label="" onRoll={() => props.onAct({ type: "roll" })} />
@@ -243,18 +248,34 @@ function ConfirmLeave({ onStay, onLeave }: { onStay: () => void; onLeave: () => 
   );
 }
 
-function TurnCard({ name, seat }: { name: string; seat: number }) {
+function TurnCard({ name, seat, mine, deadline }: { name: string; seat: number; mine: boolean; deadline: number }) {
   const theme = themeFor(seat);
+  const label = mine ? "شما" : name;
   return (
     <div className="flex w-full min-w-0 items-center gap-2 rounded-2xl bg-white px-3 py-2 shadow-sm lg:gap-4 lg:rounded-[1.8rem] lg:px-5 lg:py-5" style={{ borderRight: `8px solid ${theme.hex}` }}>
       <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-xl font-extrabold text-white shadow-inner lg:h-20 lg:w-20 lg:rounded-3xl lg:text-4xl" style={{ background: theme.hex }}>
-        {name.trim().slice(0, 1)}
+        {label.trim().slice(0, 1)}
       </span>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="text-xs font-semibold text-[#5a7e99] lg:text-sm">نوبت</p>
-        <p className="truncate text-xl font-extrabold leading-tight text-[#14324f] lg:text-4xl">{name}</p>
+        <p className="truncate text-xl font-extrabold leading-tight text-[#14324f] lg:text-4xl">{label}</p>
       </div>
+      {deadline > 0 ? <RollClock deadline={deadline} /> : null}
     </div>
+  );
+}
+
+function RollClock({ deadline }: { deadline: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 200);
+    return () => window.clearInterval(timer);
+  }, [deadline]);
+  const left = Math.max(0, Math.ceil((deadline - now) / 1000));
+  return (
+    <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-full text-lg font-extrabold lg:h-14 lg:w-14 lg:text-2xl ${left <= 5 ? "bg-rose-100 text-rose-700" : "bg-[#eef6fb] text-[#14324f]"}`}>
+      {faDigits(left)}
+    </span>
   );
 }
 
@@ -305,6 +326,7 @@ function Rules({ onClose }: { onClose: () => void }) {
           <li>زدن مهره هم یک تاس اضافه می‌دهد.</li>
           <li>برای رسیدن به مرکز باید عدد دقیق بیاید. بیشتر از مرکز مجاز نیست.</li>
           <li>اگر با آن تاس حرکتی ممکن نباشد، نوبت رد می‌شود.</li>
+          <li>برای انداختن تاس ۱۵ ثانیه وقت هست. اگر نیندازی نوبت نفر بعدی می‌شود.</li>
           <li>هر کس زودتر هر چهار مهره را به مرکز برساند برنده بازی است. بقیه ادامه می‌دهند و نفر دوم و سوم مشخص می‌شود.</li>
         </ul>
         <button type="button" className="btn-primary mt-5" onClick={onClose}>

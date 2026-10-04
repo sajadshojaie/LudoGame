@@ -18,7 +18,12 @@ import {
   legalMoves,
   roomCode,
 } from "@/utils/gameRules";
-import { connectRoom, type RoomConnection, type SyncStatus, type WireMessage } from "@/utils/syncService";
+import {
+  connectRoom,
+  type RoomConnection,
+  type SyncStatus,
+  type WireMessage,
+} from "@/utils/syncService";
 
 export interface SessionController {
   state: GameState | null;
@@ -77,7 +82,10 @@ export function useGameSession(): SessionController {
   const announceSelf = useCallback((target?: string) => {
     const hello = joinHelloRef.current;
     if (!hello || hostRef.current) return;
-    connRef.current?.send({ kind: "hello", playerId: hello.playerId, name: hello.name }, target);
+    connRef.current?.send(
+      { kind: "hello", playerId: hello.playerId, name: hello.name },
+      target,
+    );
   }, []);
 
   useEffect(() => {
@@ -86,7 +94,13 @@ export function useGameSession(): SessionController {
       const hello = joinHelloRef.current;
       const view = stateRef.current;
       if (!hello) return;
-      if (view && (view.status !== "lobby" || view.players.some((player) => player.id === hello.playerId || player.peerId === myIdRef.current))) {
+      if (
+        view &&
+        (view.status !== "lobby" ||
+          view.players.some(
+            (player) => player.id === hello.playerId || player.peerId === myIdRef.current,
+          ))
+      ) {
         return;
       }
       announceSelf();
@@ -115,7 +129,8 @@ export function useGameSession(): SessionController {
       seenMove.current = move.id;
       const hops = move.to < 0 ? 1 : move.from < 0 ? 1 : Math.max(1, move.to - move.from);
       for (let i = 0; i < hops; i++) window.setTimeout(() => audio?.step(), i * HOP_MS);
-      if (move.capturedIds.length) window.setTimeout(() => audio?.capture(), hops * HOP_MS);
+      if (move.capturedIds.length)
+        window.setTimeout(() => audio?.capture(), hops * HOP_MS);
       if (isFinishedProgress(move.to, current.maxPlayers)) {
         window.setTimeout(() => audio?.arrive(), hopDuration(move.from, move.to));
       }
@@ -205,17 +220,39 @@ export function useGameSession(): SessionController {
     return () => window.clearTimeout(timer);
   }, [hostApply, isHost, state]);
 
+  useEffect(() => {
+    if (!isHost || !state || state.status !== "playing" || state.phase !== "roll" || !state.rollDeadline) return;
+    const player = state.players[state.currentPlayerIndex];
+    if (!player || player.kind !== "human") return;
+    const revision = state.revision;
+    const wait = Math.max(0, state.rollDeadline - Date.now());
+    const timer = window.setTimeout(() => {
+      const current = stateRef.current;
+      if (!current || current.revision !== revision || !hostRef.current) return;
+      if (current.phase !== "roll" || current.status !== "playing") return;
+      hostApply({ type: "pass" }, current.hostId);
+    }, wait);
+    return () => window.clearTimeout(timer);
+  }, [hostApply, isHost, state]);
+
   const handleWire = useCallback(
     (message: WireMessage, peerId: string) => {
       if (message.kind === "hello" && hostRef.current) {
         const prev = stateRef.current;
         if (!prev) return;
-        if (prev.players.some((player) => player.peerId === peerId || player.id === message.playerId)) {
+        if (
+          prev.players.some(
+            (player) => player.peerId === peerId || player.id === message.playerId,
+          )
+        ) {
           publish(prev, peerId);
           return;
         }
         if (prev.status !== "lobby") {
-          connRef.current?.send({ kind: "reject", reason: "این بازی شروع شده. فقط می‌توانید تماشا کنید." }, peerId);
+          connRef.current?.send(
+            { kind: "reject", reason: "این بازی شروع شده. فقط می‌توانید تماشا کنید." },
+            peerId,
+          );
           publish(prev, peerId);
           return;
         }
@@ -246,7 +283,9 @@ export function useGameSession(): SessionController {
         if (
           hello &&
           view?.status === "lobby" &&
-          !view.players.some((player) => player.id === hello.playerId || player.peerId === myIdRef.current)
+          !view.players.some(
+            (player) => player.id === hello.playerId || player.peerId === myIdRef.current,
+          )
         ) {
           announceSelf(peerId);
         }
@@ -282,13 +321,23 @@ export function useGameSession(): SessionController {
       if (myIdRef.current) alive.add(myIdRef.current);
       alive.delete(peerId);
       const candidates = prev.players
-        .filter((player) => player.kind === "human" && player.peerId && player.peerId !== peerId && alive.has(player.peerId))
+        .filter(
+          (player) =>
+            player.kind === "human" &&
+            player.peerId &&
+            player.peerId !== peerId &&
+            alive.has(player.peerId),
+        )
         .sort((a, b) => a.seat - b.seat);
       if (candidates[0]?.peerId !== myIdRef.current) return;
       hostRef.current = true;
       setIsHost(true);
       const converted = convertPeerToBot(prev, peerId);
-      const next = { ...converted, hostId: myIdRef.current ?? converted.hostId, revision: converted.revision + 1 };
+      const next = {
+        ...converted,
+        hostId: myIdRef.current ?? converted.hostId,
+        revision: converted.revision + 1,
+      };
       commit(next);
       publish(next);
     },
@@ -437,10 +486,16 @@ export function useGameSession(): SessionController {
           name: name.trim().slice(0, 18) || "مهمان",
         };
         flush();
-        window.history.replaceState(null, "", `${window.location.pathname}?room=${clean}`);
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}?room=${clean}`,
+        );
         window.setTimeout(() => {
           if (!stateRef.current) {
-            setSyncDetail("هنوز از شهر دیگر وصل نشده. صفحه را نبندید؛ اگر مودم مسیر مستقیم را بسته باشد از سرور کمکی رد می‌شویم.");
+            setSyncDetail(
+              "هنوز میزبان پیدا نشده. همین صفحه را باز نگه دارید تا وصل شود.",
+            );
           }
         }, 12000);
       } catch (err) {
@@ -459,8 +514,12 @@ export function useGameSession(): SessionController {
       if (!current) return;
       const mine = myIdRef.current ?? current.hostId;
       if (!online) {
-        const currentId = current.players[current.currentPlayerIndex]?.id ?? current.hostId;
-        hostApply(intent, intent.type === "roll" || intent.type === "move" ? currentId : current.hostId);
+        const currentId =
+          current.players[current.currentPlayerIndex]?.id ?? current.hostId;
+        hostApply(
+          intent,
+          intent.type === "roll" || intent.type === "move" ? currentId : current.hostId,
+        );
         return;
       }
       if (hostRef.current) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { buildLayout, finishProgress, homeLength, minCenterDistance, seatPlan, trackLength } from "../src/utils/boardGeometry.ts";
 import {
   addBot,
+  applyIntent,
   applyMove,
   applyRoll,
   createLocalMatch,
@@ -334,6 +335,17 @@ function fresh(count: PlayerCount = 4) {
   state = applyMove(state, redToken.id, 0);
   const stillThere = state.tokens.filter((token) => token.playerId === green.id && token.progress === greenProgress);
   assert.equal(stillThere.length, 2);
+}
+
+{
+  let state = fresh(2);
+  const before = state.currentPlayerIndex;
+  assert.ok(state.rollDeadline > Date.now());
+  const early = applyIntent(state, { type: "pass" }, state.hostId, Date.now());
+  assert.equal(early, null);
+  state = applyIntent(state, { type: "pass" }, state.hostId, state.rollDeadline)!;
+  assert.notEqual(state.currentPlayerIndex, before);
+  assert.match(state.log.at(-1)?.text ?? "", /تاس نینداخت/);
 }
 
 console.log("rules ok");

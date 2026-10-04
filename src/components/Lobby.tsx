@@ -37,7 +37,8 @@ export function Lobby({ initialRoom = "", busy, error, onDismissError, onLocal, 
     else window.localStorage.removeItem(NAME_KEY);
   }
   const [code, setCode] = useState(initialRoom);
-  const [panel, setPanel] = useState<"play" | "join">(initialRoom ? "join" : "play");
+  const [panel, setPanel] = useState<"offline" | "online">(initialRoom ? "online" : "offline");
+  const [onlineMode, setOnlineMode] = useState<"create" | "join">(initialRoom ? "join" : "create");
   const [seats, setSeats] = useState<SeatSetup[]>(() =>
     ["شما", "رویا", "کیان", "سارا", "نیما", "لاله"].map((label, index) => ({
       name: label,
@@ -86,11 +87,11 @@ export function Lobby({ initialRoom = "", busy, error, onDismissError, onLocal, 
         <h1 className="text-center font-display text-4xl text-[#14324f]">منچ بازی</h1>
 
         <div className="mt-5 flex gap-1 rounded-full bg-[#eef6fb] p-1">
-          <button type="button" className={`seg ${panel === "play" ? "seg-on" : ""}`} onClick={() => setPanel("play")}>
-            <Dices size={16} /> بازی
+          <button type="button" className={`seg text-sm ${panel === "offline" ? "seg-on" : ""}`} onClick={() => setPanel("offline")}>
+            <Dices size={16} /> بازی آفلاین
           </button>
-          <button type="button" className={`seg ${panel === "join" ? "seg-on" : ""}`} onClick={() => setPanel("join")}>
-            <Link2 size={16} /> ورود
+          <button type="button" className={`seg text-sm ${panel === "online" ? "seg-on" : ""}`} onClick={() => setPanel("online")}>
+            <Link2 size={16} /> بازی آنلاین
           </button>
         </div>
 
@@ -103,7 +104,7 @@ export function Lobby({ initialRoom = "", busy, error, onDismissError, onLocal, 
           onChange={(event) => rememberName(event.target.value)}
         />
 
-        {panel === "play" ? (
+        {panel === "offline" ? (
           <>
             <div className="mt-4 grid grid-cols-5 gap-2">
               {COUNTS.map((value) => (
@@ -156,38 +157,58 @@ export function Lobby({ initialRoom = "", busy, error, onDismissError, onLocal, 
                 );
               })}
             </ul>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={busy || !trimmed}
-                onClick={() => onLocal(count, seats.slice(0, count).map((seat, i) => ({ ...seat, name: i === 0 ? trimmed : seat.name })), trimmed)}
-              >
-                شروع بازی
-              </button>
-              <button type="button" className="btn-ghost" disabled={busy || !trimmed} onClick={() => onCreate(count, trimmed)}>
-                اتاق آنلاین
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <input
-              className="field mt-4 text-center tracking-[0.28em] uppercase"
-              value={code}
-              maxLength={8}
-              placeholder="کد اتاق"
-              aria-label="کد اتاق"
-              onChange={(event) => setCode(event.target.value.toUpperCase())}
-            />
             <button
               type="button"
               className="btn-primary mt-4 w-full"
-              disabled={busy || !trimmed || code.trim().length < 4}
-              onClick={() => onJoin(code, trimmed)}
+              disabled={busy || !trimmed}
+              onClick={() => onLocal(count, seats.slice(0, count).map((seat, i) => ({ ...seat, name: i === 0 ? trimmed : seat.name })), trimmed)}
             >
-              ورود
+              شروع بازی
             </button>
+          </>
+        ) : (
+          <>
+            <div className="mt-4 flex gap-1 rounded-full bg-[#eef6fb] p-1">
+              <button type="button" className={`seg text-sm ${onlineMode === "create" ? "seg-on" : ""}`} onClick={() => setOnlineMode("create")}>
+                ساخت اتاق
+              </button>
+              <button type="button" className={`seg text-sm ${onlineMode === "join" ? "seg-on" : ""}`} onClick={() => setOnlineMode("join")}>
+                ورود به اتاق
+              </button>
+            </div>
+            {onlineMode === "create" ? (
+              <>
+                <div className="mt-4 grid grid-cols-5 gap-2">
+                  {COUNTS.map((value) => (
+                    <button key={value} type="button" className={`count-btn ${count === value ? "count-on" : ""}`} onClick={() => setCount(value)}>
+                      {faDigits(value)}
+                    </button>
+                  ))}
+                </div>
+                <button type="button" className="btn-primary mt-4 w-full" disabled={busy || !trimmed} onClick={() => onCreate(count, trimmed)}>
+                  ساخت اتاق
+                </button>
+              </>
+            ) : (
+              <>
+                <input
+                  className="field mt-4 text-center tracking-[0.28em] uppercase"
+                  value={code}
+                  maxLength={8}
+                  placeholder="کد اتاق"
+                  aria-label="کد اتاق"
+                  onChange={(event) => setCode(event.target.value.toUpperCase())}
+                />
+                <button
+                  type="button"
+                  className="btn-primary mt-4 w-full"
+                  disabled={busy || !trimmed || code.trim().length < 4}
+                  onClick={() => onJoin(code, trimmed)}
+                >
+                  ورود به اتاق
+                </button>
+              </>
+            )}
           </>
         )}
 

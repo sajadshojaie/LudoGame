@@ -21,6 +21,7 @@ import {
 import { faDigits } from "@/utils/palette";
 
 export const DICE_MS = 880;
+export const TURN_LIMIT_MS = 15_000;
 export const HOP_MS = 340;
 export const BOT_THINK_MS = 1200;
 
@@ -64,7 +65,7 @@ export function createLocalMatch(count: PlayerCount, seats: SeatSetup[], hostNam
     peerId: null,
     connected: true,
   }));
-  return baseState({
+  const state = baseState({
     roomId: null,
     hostId: players[0].id,
     maxPlayers: count,
@@ -72,6 +73,7 @@ export function createLocalMatch(count: PlayerCount, seats: SeatSetup[], hostNam
     status: "playing",
     phase: "roll",
   });
+  return { ...state, rollDeadline: rollClock(players, 0, Date.now(), 0, true) };
 }
 
 export function createLobby(options: {
@@ -133,6 +135,7 @@ function baseState(partial: {
       ),
     ],
     busyUntil: 0,
+    rollDeadline: 0,
     moveSeq: 0,
     lastMove: null,
   };
@@ -235,6 +238,12 @@ function nextPlayerIndex(state: GameState, from: number, tokens: Token[], rankin
   return from;
 }
 
+function rollClock(players: Player[], index: number, now: number, busyUntil: number, playing: boolean): number {
+  const player = players[index];
+  if (!playing || !player || player.kind !== "human") return 0;
+  return Math.max(now, busyUntil) + TURN_LIMIT_MS;
+}
+
 export function hopDuration(from: number, to: number): number {
   if (to < 0) return HOP_MS + 180;
   if (from < 0) return HOP_MS + 220;
@@ -263,6 +272,7 @@ export function applyRoll(state: GameState, value: number, now: number): GameSta
       consecutiveSixes: 0,
       currentPlayerIndex: next,
       busyUntil: now + DICE_MS + 420,
+      rollDeadline: rollClock(state.players, next, now, now + DICE_MS + 420, true),
       log: withLog(state, "six", `${player.name} برای سومین بار ${faDigits(6)} آورد. نوبت سوخت.`),
     };
   }
@@ -276,6 +286,7 @@ export function applyRoll(state: GameState, value: number, now: number): GameSta
       consecutiveSixes: 0,
       currentPlayerIndex: next,
       busyUntil: now + DICE_MS + 520,
+      rollDeadline: rollClock(state.players, next, now, now + DICE_MS + 520, true),
       log: withLog(state, "info", `${player.name} ${faDigits(value)} آورد. حرکتی ممکن نیست.`),
     };
   }
@@ -284,7 +295,26 @@ export function applyRoll(state: GameState, value: number, now: number): GameSta
     ...rolled,
     phase: "move",
     busyUntil: now + DICE_MS,
+    rollDeadline: 0,
     log: withLog(state, value === 6 ? "six" : "info", `${player.name} ${faDigits(value)} آورد.`),
+  };
+}
+
+export function passRoll(state: GameState, now: number): GameState {
+  if (state.status !== "playing" || state.phase !== "roll") return state;
+  const player = state.players[state.currentPlayerIndex];
+  if (!player) return state;
+  const next = nextPlayerIndex(state, state.currentPlayerIndex, state.tokens, state.rankings);
+  const busyUntil = now;
+  return {
+    ...state,
+    revision: state.revision + 1,
+    phase: "roll",
+    consecutiveSixes: 0,
+    currentPlayerIndex: next,
+    busyUntil,
+    rollDeadline: rollClock(state.players, next, now, busyUntil, true),
+    log: withLog(state, "info", `${player.name} در ۱۵ ثانیه تاس نینداخت.`),
   };
 }
 
@@ -355,6 +385,16 @@ export function applyMove(state: GameState, tokenId: string, now: number): GameS
     consecutiveSixes: bonus && state.dice === 6 ? state.consecutiveSixes : 0,
     dice: state.dice,
     busyUntil: now + hopDuration(move.from, move.to) + (move.captures.length ? HOP_MS : 0),
+    rollDeadline:
+      status === "finished"
+        ? 0
+        : rollClock(
+            state.players,
+            nextIndex,
+            now,
+            now + hopDuration(move.from, move.to) + (move.captures.length ? HOP_MS : 0),
+            true,
+          ),
     moveSeq: state.moveSeq + 1,
     lastMove,
     log: withLog(
@@ -422,6 +462,7 @@ export function startMatch(state: GameState, now: number): GameState {
     openingMisses: {},
     rankings: [],
     busyUntil: now + 400,
+    rollDeadline: rollClock(players, 0, now, now + 400, true),
     moveSeq: 0,
     lastMove: null,
     log: withLog(state, "system", `بازی شروع شد. ${players[0].name} اول تاس می‌اندازد.`),
@@ -446,6 +487,7 @@ export function rematch(state: GameState, now: number): GameState {
     openingMisses: {},
     rankings: [],
     busyUntil: now + 400,
+    rollDeadline: rollClock(players, 0, now, now + 400, true),
     moveSeq: state.moveSeq + 1,
     lastMove: null,
     log: [entry("system", "بازی دوباره. مهره‌ها برگشتند سر جای خود.")],
@@ -482,6 +524,13 @@ export function applyIntent(state: GameState, intent: Intent, actorId: string, n
     if (actorId !== state.hostId) return null;
     if (state.rankings.length === 0 && state.status !== "finished") return null;
     return rematch(state, now);
+  }
+  if (intent.type === "pass") {
+    if (actorId !== state.hostId && actorId !== state.players[state.currentPlayerIndex]?.id) return null;
+    if (state.phase !== "roll" || state.status !== "playing" || now < state.busyUntil) return null;
+    if (state.rollDeadline && now + 250 < state.rollDeadline) return null;
+    const next = passRoll(state, now);
+    return next.revision === state.revision ? null : next;
   }
   if (state.status !== "playing") return null;
   if (now < state.busyUntil) return null;

@@ -67,6 +67,8 @@ export interface GameState {
   rankings: string[];
   log: LogEntry[];
   busyUntil: number;
+  /** Epoch ms when the current human must have rolled. 0 while it is not their roll. */
+  rollDeadline: number;
   moveSeq: number;
   lastMove: LastMove | null;
 }
@@ -78,6 +80,7 @@ export interface SeatSetup {
 
 export type Intent =
   | { type: "roll" }
+  | { type: "pass" }
   | { type: "move"; tokenId: string }
   | { type: "start" }
   | { type: "add-bot" }
