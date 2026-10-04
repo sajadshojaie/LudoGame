@@ -107,7 +107,7 @@ export function useGameSession(): SessionController {
       seenRoll.current = current.rollId;
       if (current.dice != null) {
         audio?.dice();
-        if (current.dice === 6) audio?.six(0.2);
+        if (current.dice === 6) audio?.six(0.82);
       }
     }
     if (current.lastMove && current.lastMove.id !== seenMove.current) {
@@ -440,9 +440,9 @@ export function useGameSession(): SessionController {
         window.history.replaceState(null, "", `${window.location.pathname}?room=${clean}`);
         window.setTimeout(() => {
           if (!stateRef.current) {
-            setSyncDetail("هنوز میزبان پیدا نشده. همین صفحه را باز نگه دارید تا وصل شود.");
+            setSyncDetail("هنوز از شهر دیگر وصل نشده. صفحه را نبندید؛ اگر مودم مسیر مستقیم را بسته باشد از سرور کمکی رد می‌شویم.");
           }
-        }, 8000);
+        }, 12000);
       } catch (err) {
         setWaiting(false);
         setOnline(false);
