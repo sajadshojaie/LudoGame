@@ -19,6 +19,7 @@ interface GameScreenProps {
   soundOn: boolean;
   diceRolling: boolean;
   inputLocked: boolean;
+  offlinePeerIds: string[];
   onAct: (intent: Intent) => void;
   onLeave: () => void;
   onToggleSound: () => void;
@@ -148,7 +149,17 @@ export function GameScreen(props: GameScreenProps) {
             ) : null}
             <div className="flex max-w-full gap-1.5 overflow-x-auto pb-1 lg:order-3 lg:w-full lg:flex-col lg:gap-2 lg:overflow-visible lg:pb-0">
               {state.players.map((player) => (
-                <SeatCard key={player.id} name={player.name} seat={player.seat} active={displayed?.id === player.id} bot={player.kind === "bot"} place={place(player.id)} />
+                <SeatCard
+                  key={player.id}
+                  name={player.name}
+                  seat={player.seat}
+                  active={displayed?.id === player.id}
+                  bot={player.kind === "bot"}
+                  place={place(player.id)}
+                  online={props.online}
+                  linked={player.connected && !props.offlinePeerIds.includes(player.peerId ?? "")}
+                  roll={state.phase === "roll" && !props.diceRolling && displayed?.id === player.id}
+                />
               ))}
               {state.rankings.length > 0 && (props.isHost || !props.online) ? (
                 <button type="button" className="btn-primary mt-2 shrink-0" onClick={() => props.onAct({ type: "rematch" })}>
@@ -187,6 +198,7 @@ function LobbyPanel({ state, isHost, online, onAct }: GameScreenProps) {
             <li key={player.id} className="flex items-center gap-3 rounded-2xl bg-white/80 px-3 py-2">
               <span className="h-8 w-8 rounded-full" style={{ background: theme.hex }} />
               <span className="flex-1">{player.name}</span>
+              {online && player.kind === "human" ? <LinkDot on={player.connected} /> : null}
               <span className="text-xs text-[#5a7e99]">{player.kind === "bot" ? "ربات" : theme.label}</span>
             </li>
           );
@@ -285,18 +297,33 @@ function placeLabel(place: number): string {
   return names[place - 2] ?? `نفر ${faDigits(place)}`;
 }
 
+function LinkDot({ on }: { on: boolean }) {
+  return (
+    <span
+      className={`h-2.5 w-2.5 shrink-0 rounded-full ${on ? "bg-emerald-500" : "bg-rose-500"}`}
+      title={on ? "وصل" : "قطع، در حال برگشت"}
+    />
+  );
+}
+
 function SeatCard({
   name,
   seat,
   active,
   bot,
   place,
+  online,
+  linked,
+  roll,
 }: {
   name: string;
   seat: number;
   active: boolean;
   bot: boolean;
   place: number | null;
+  online: boolean;
+  linked: boolean;
+  roll: boolean;
 }) {
   const theme = themeFor(seat);
   return (
@@ -305,7 +332,14 @@ function SeatCard({
       style={active ? { outline: `2px solid ${theme.hex}` } : undefined}
     >
       <span className="h-4 w-4 shrink-0 rounded-full" style={{ background: theme.hex }} />
+      {roll ? (
+        <span className="flex shrink-0 items-center gap-0.5" aria-hidden>
+          <span className="h-4 w-1 rounded-full bg-[#14324f]" />
+          <span className="h-4 w-1 rounded-full bg-[#14324f]" />
+        </span>
+      ) : null}
       <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#14324f] lg:text-sm">{name}</span>
+      {online && !bot ? <LinkDot on={linked} /> : null}
       {bot && !place ? <Bot size={14} className="shrink-0 text-[#7f9aaf]" /> : null}
       {place ? <span className={`shrink-0 text-xs font-bold ${place === 1 ? "text-amber-600" : "text-[#5a7e99]"}`}>{placeLabel(place)}</span> : null}
     </div>

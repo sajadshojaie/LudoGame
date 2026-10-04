@@ -11,6 +11,8 @@ import {
   openingFaceCount,
   startMatch,
   createLobby,
+  markPeerAway,
+  reattachHuman,
 } from "../src/utils/gameRules.ts";
 import type { PlayerCount } from "../src/types/game.ts";
 
@@ -346,6 +348,22 @@ function fresh(count: PlayerCount = 4) {
   state = applyIntent(state, { type: "pass" }, state.hostId, state.rollDeadline)!;
   assert.notEqual(state.currentPlayerIndex, before);
   assert.match(state.log.at(-1)?.text ?? "", /تاس نینداخت/);
+}
+
+{
+  let state = fresh(2);
+  const human = state.players[0];
+  state = { ...state, players: state.players.map((player) => (player.id === human.id ? { ...player, peerId: "peer-a", connected: true } : player)) };
+  const away = markPeerAway(state, "peer-a");
+  assert.equal(away.players[0].kind, "human");
+  assert.equal(away.players[0].connected, false);
+  assert.equal(away.rollDeadline, 0);
+  assert.equal(applyIntent(away, { type: "pass" }, away.hostId, Date.now() + 60_000), null);
+  const back = reattachHuman(away, human.id, "peer-b");
+  assert.equal(back.players[0].connected, true);
+  assert.equal(back.players[0].peerId, "peer-b");
+  assert.equal(back.players[0].kind, "human");
+  assert.ok(back.rollDeadline > Date.now());
 }
 
 console.log("rules ok");

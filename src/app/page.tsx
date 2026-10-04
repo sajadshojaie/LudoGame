@@ -57,6 +57,7 @@ function Table() {
         soundOn={session.soundOn}
         diceRolling={session.diceRolling}
         inputLocked={session.inputLocked}
+        offlinePeerIds={session.offlinePeerIds}
         onAct={session.act}
         onLeave={session.leave}
         onToggleSound={session.toggleSound}

@@ -11,6 +11,8 @@ import {
   addHuman,
   applyIntent,
   convertPeerToBot,
+  markPeerAway,
+  reattachHuman,
   createLobby,
   createLocalMatch,
   hopDuration,
@@ -21,11 +23,42 @@ import {
 import {
   connectRoom,
   RoomBusyError,
+  type ConnectOptions,
   type RoomConnection,
   type RoomRole,
   type SyncStatus,
   type WireMessage,
 } from "@/utils/syncService";
+
+const SEAT_KEY = "manch-seat";
+
+interface SeatMemory {
+  roomId: string;
+  playerId: string;
+  name: string;
+  role: RoomRole;
+  relayId: string;
+}
+
+function readSeat(): SeatMemory | null {
+  try {
+    const raw = window.sessionStorage.getItem(SEAT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SeatMemory;
+    if (!parsed.roomId || !parsed.playerId || !parsed.relayId || (parsed.role !== "host" && parsed.role !== "guest")) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function rememberSeat(seat: SeatMemory) {
+  window.sessionStorage.setItem(SEAT_KEY, JSON.stringify(seat));
+}
+
+function forgetSeat() {
+  window.sessionStorage.removeItem(SEAT_KEY);
+}
 
 export interface SessionController {
   state: GameState | null;
@@ -39,6 +72,7 @@ export interface SessionController {
   soundOn: boolean;
   diceRolling: boolean;
   inputLocked: boolean;
+  offlinePeerIds: string[];
   startLocal: (count: PlayerCount, seats: SeatSetup[], name: string) => void;
   createOnline: (count: PlayerCount, name: string) => Promise<void>;
   joinOnline: (code: string, name: string) => Promise<void>;
@@ -60,6 +94,7 @@ export function useGameSession(): SessionController {
   const [soundOn, setSoundOn] = useState(true);
   const [diceRolling, setDiceRolling] = useState(false);
   const [inputLocked, setInputLocked] = useState(false);
+  const [offlinePeerIds, setOfflinePeerIds] = useState<string[]>([]);
 
   const stateRef = useRef<GameState | null>(null);
   const connRef = useRef<RoomConnection | null>(null);
@@ -71,6 +106,7 @@ export function useGameSession(): SessionController {
   const winPlayed = useRef(false);
   const readyRef = useRef(false);
   const joinHelloRef = useRef<{ playerId: string; name: string } | null>(null);
+  const resumedRef = useRef(false);
 
   const commit = useCallback((next: GameState | null) => {
     stateRef.current = next;
@@ -83,7 +119,8 @@ export function useGameSession(): SessionController {
 
   const announceSelf = useCallback((target?: string) => {
     const hello = joinHelloRef.current;
-    if (!hello || hostRef.current) return;
+    if (!hello) return;
+    if (hostRef.current && stateRef.current?.players.some((player) => player.id === hello.playerId && player.connected)) return;
     connRef.current?.send(
       { kind: "hello", playerId: hello.playerId, name: hello.name },
       target,
@@ -99,24 +136,16 @@ export function useGameSession(): SessionController {
   }, [online, state]);
 
   useEffect(() => {
-    if (!online || isHost) return;
+    if (!online) return;
     const timer = window.setInterval(() => {
       const hello = joinHelloRef.current;
       const view = stateRef.current;
       if (!hello) return;
-      if (
-        view &&
-        (view.status !== "lobby" ||
-          view.players.some(
-            (player) => player.id === hello.playerId || player.peerId === myIdRef.current,
-          ))
-      ) {
-        return;
-      }
+      if (view?.players.some((player) => player.id === hello.playerId && player.connected)) return;
       announceSelf();
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [announceSelf, isHost, online]);
+  }, [announceSelf, online]);
 
   useEffect(() => {
     audioRef.current = createSoundboard();
@@ -233,7 +262,7 @@ export function useGameSession(): SessionController {
   useEffect(() => {
     if (!isHost || !state || state.status !== "playing" || state.phase !== "roll" || !state.rollDeadline) return;
     const player = state.players[state.currentPlayerIndex];
-    if (!player || player.kind !== "human") return;
+    if (!player || player.kind !== "human" || !player.connected) return;
     const revision = state.revision;
     const wait = Math.max(0, state.rollDeadline - Date.now());
     const timer = window.setTimeout(() => {
@@ -247,15 +276,21 @@ export function useGameSession(): SessionController {
 
   const handleWire = useCallback(
     (message: WireMessage, peerId: string) => {
-      if (message.kind === "hello" && hostRef.current) {
+      if (message.kind === "hello") {
         const prev = stateRef.current;
+        if (!hostRef.current) {
+          if (prev) connRef.current?.send({ kind: "state", state: prev }, peerId);
+          return;
+        }
         if (!prev) return;
-        if (
-          prev.players.some(
-            (player) => player.peerId === peerId || player.id === message.playerId,
-          )
-        ) {
-          publish(prev, peerId);
+        const existing = prev.players.find(
+          (player) => player.id === message.playerId || player.peerId === peerId,
+        );
+        if (existing?.kind === "human") {
+          const next = reattachHuman(prev, existing.id, peerId);
+          if (next !== prev) commit(next);
+          publish(next === prev ? prev : next);
+          setOfflinePeerIds((ids) => ids.filter((id) => id !== peerId && id !== existing.peerId));
           return;
         }
         if (prev.status !== "lobby") {
@@ -282,13 +317,19 @@ export function useGameSession(): SessionController {
         publish(next);
         return;
       }
-      if (message.kind === "state" && !hostRef.current) {
+      if (message.kind === "state") {
         const prev = stateRef.current;
-        if (!prev || message.state.revision > prev.revision) {
-          commit(message.state);
-          setWaiting(false);
-        }
+        if (hostRef.current && prev) return;
         const hello = joinHelloRef.current;
+        let incoming = message.state;
+        if (hostRef.current && !prev && hello) {
+          incoming = reattachHuman(incoming, hello.playerId, myIdRef.current ?? hello.playerId);
+        }
+        if (!prev || incoming.revision > prev.revision) {
+          commit(incoming);
+          setWaiting(false);
+          if (hostRef.current && incoming !== message.state) publish(incoming);
+        }
         const view = stateRef.current;
         if (
           hello &&
@@ -314,9 +355,20 @@ export function useGameSession(): SessionController {
   );
 
   const handleLeavePeer = useCallback(
-    (peerId: string) => {
+    (peerId: string, explicit: boolean) => {
       const prev = stateRef.current;
       if (!prev) return;
+      if (!explicit) {
+        setOfflinePeerIds((ids) => (ids.includes(peerId) ? ids : [...ids, peerId]));
+        if (!hostRef.current) return;
+        const next = markPeerAway(prev, peerId);
+        if (next !== prev) {
+          commit(next);
+          publish(next);
+        }
+        return;
+      }
+      setOfflinePeerIds((ids) => ids.filter((id) => id !== peerId));
       const hostPlayer = prev.players.find((player) => player.id === prev.hostId);
       if (hostRef.current) {
         const next = convertPeerToBot(prev, peerId);
@@ -362,22 +414,33 @@ export function useGameSession(): SessionController {
   });
 
   const openRoom = useCallback(
-    async (code: string, role: RoomRole) => {
+    async (code: string, role: RoomRole, options?: ConnectOptions) => {
       connRef.current?.leave();
       readyRef.current = false;
       const early: Array<{ message: WireMessage; peerId: string }> = [];
       const earlyPeers: string[] = [];
       const connection = await connectRoom(code, {
         onPeerJoin: (peerId) => {
+          setOfflinePeerIds((ids) => ids.filter((id) => id !== peerId));
           if (!readyRef.current) {
             earlyPeers.push(peerId);
             return;
           }
-          if (hostRef.current && stateRef.current) publish(stateRef.current, peerId);
-          else announceSelf(peerId);
+          if (hostRef.current && stateRef.current) {
+            const existing = stateRef.current.players.find(
+              (player) => player.peerId === peerId && player.kind === "human" && !player.connected,
+            );
+            if (existing) {
+              const next = reattachHuman(stateRef.current, existing.id, peerId);
+              commit(next);
+              publish(next);
+              return;
+            }
+            publish(stateRef.current, peerId);
+          } else announceSelf(peerId);
         },
-        onPeerLeave: (peerId) => {
-          if (readyRef.current) leavePeerRef.current(peerId);
+        onPeerLeave: (peerId, explicit) => {
+          if (readyRef.current) leavePeerRef.current(peerId, explicit);
         },
         onMessage: (message, peerId) => {
           if (!readyRef.current) early.push({ message, peerId });
@@ -387,7 +450,7 @@ export function useGameSession(): SessionController {
           setSyncStatus(status);
           setSyncDetail(detail ?? null);
         },
-      }, role);
+      }, role, options);
       connRef.current = connection;
       return {
         connection,
@@ -402,7 +465,7 @@ export function useGameSession(): SessionController {
         },
       };
     },
-    [announceSelf, publish],
+    [announceSelf, commit, publish],
   );
 
   const leave = useCallback(() => {
@@ -420,6 +483,8 @@ export function useGameSession(): SessionController {
     setSyncDetail(null);
     setDiceRolling(false);
     setInputLocked(false);
+    setOfflinePeerIds([]);
+    forgetSeat();
     commit(null);
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", window.location.pathname);
@@ -463,10 +528,17 @@ export function useGameSession(): SessionController {
             count,
             peerId: connection.selfId,
           });
-          commit(next);
-          flush();
-          setWaiting(false);
-          window.history.replaceState(null, "", `${window.location.pathname}?room=${code}`);
+        commit(next);
+        flush();
+        rememberSeat({
+          roomId: code,
+          playerId: connection.selfId,
+          name: name.trim().slice(0, 18) || "میزبان",
+          role: "host",
+          relayId: connection.selfId,
+        });
+        setWaiting(false);
+        window.history.replaceState(null, "", `${window.location.pathname}?room=${code}`);
           return;
         } catch (err) {
           lastError = err;
@@ -499,10 +571,18 @@ export function useGameSession(): SessionController {
         const { connection, flush } = await openRoom(clean, "guest");
         myIdRef.current = connection.selfId;
         setMyId(connection.selfId);
+        const guestName = name.trim().slice(0, 18) || "مهمان";
         joinHelloRef.current = {
           playerId: connection.selfId,
-          name: name.trim().slice(0, 18) || "مهمان",
+          name: guestName,
         };
+        rememberSeat({
+          roomId: clean,
+          playerId: connection.selfId,
+          name: guestName,
+          role: "guest",
+          relayId: connection.selfId,
+        });
         flush();
         window.history.replaceState(
           null,
@@ -556,6 +636,47 @@ export function useGameSession(): SessionController {
     [hostApply, online],
   );
 
+  const resumeOnline = useCallback(
+    async (saved: SeatMemory) => {
+      setError(null);
+      setWaiting(true);
+      setOnline(true);
+      hostRef.current = saved.role === "host";
+      setIsHost(saved.role === "host");
+      myIdRef.current = saved.playerId;
+      setMyId(saved.playerId);
+      joinHelloRef.current = { playerId: saved.playerId, name: saved.name };
+      try {
+        const { flush } = await openRoom(saved.roomId, saved.role, {
+          selfId: saved.relayId,
+          resume: true,
+        });
+        flush();
+        window.history.replaceState(null, "", `${window.location.pathname}?room=${saved.roomId}`);
+        window.setTimeout(() => {
+          if (!stateRef.current) {
+            setSyncDetail("هنوز به بازی برنگشتیم. صفحه را باز نگه دارید تا دوباره وصل شود.");
+          }
+        }, 12000);
+      } catch (err) {
+        setWaiting(false);
+        setOnline(false);
+        hostRef.current = false;
+        setIsHost(false);
+        setError(err instanceof Error ? err.message : "برگشت به بازی ممکن نشد.");
+      }
+    },
+    [openRoom],
+  );
+
+  useEffect(() => {
+    if (resumedRef.current) return;
+    const saved = readSeat();
+    if (!saved) return;
+    resumedRef.current = true;
+    void resumeOnline(saved);
+  }, [resumeOnline]);
+
   const toggleSound = useCallback(() => {
     const muted = audioRef.current?.toggle() ?? false;
     setSoundOn(!muted);
@@ -573,6 +694,7 @@ export function useGameSession(): SessionController {
     soundOn,
     diceRolling,
     inputLocked,
+    offlinePeerIds,
     startLocal,
     createOnline,
     joinOnline,

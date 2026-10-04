@@ -19,7 +19,7 @@ export interface RoomConnection {
 
 export interface SyncHandlers {
   onPeerJoin: (peerId: string) => void;
-  onPeerLeave: (peerId: string) => void;
+  onPeerLeave: (peerId: string, explicit: boolean) => void;
   onMessage: (message: WireMessage, peerId: string) => void;
   onStatus: (status: SyncStatus, detail?: string) => void;
 }
@@ -34,7 +34,7 @@ export class RoomBusyError extends Error {
 const RELAY = "https://ntfy.sh";
 const CHUNK_BYTES = 2800;
 const HEARTBEAT_MS = 8000;
-const PEER_TIMEOUT_MS = 22000;
+const PEER_TIMEOUT_MS = 36_000;
 const CLAIM_WAIT_MS = 700;
 
 interface RelayPacket {
@@ -115,14 +115,20 @@ function openSocket(topic: string): Promise<WebSocket> {
   });
 }
 
+export interface ConnectOptions {
+  selfId?: string;
+  resume?: boolean;
+}
+
 export async function connectRoom(
   roomId: string,
   handlers: SyncHandlers,
   role: RoomRole,
+  options?: ConnectOptions,
 ): Promise<RoomConnection> {
   handlers.onStatus("connecting", role === "host" ? "در حال ساخت اتاق…" : "در حال پیدا کردن میزبان…");
   const topic = topicFor(roomId);
-  const selfId = `${role === "host" ? "h" : "g"}-${crypto.randomUUID()}`;
+  const selfId = options?.selfId || `${role === "host" ? "h" : "g"}-${crypto.randomUUID()}`;
   const peers = new Map<string, number>();
   const partials = new Map<string, PartialMessage>();
   const seen = new Set<string>();
@@ -158,7 +164,7 @@ export async function connectRoom(
         }
       })
       .catch(() => {
-        if (!gone) handlers.onStatus("error", "فرستادن پیام به اتاق ممکن نشد. صفحه را باز نگه دارید.");
+        if (!gone) handlers.onStatus("connecting", "ارتباط لحظه‌ای قطع شد. دوباره وصل می‌شویم…");
       });
   };
 
@@ -215,7 +221,7 @@ export async function connectRoom(
       return;
     }
     if (packet.sys === "bye") {
-      if (peers.delete(packet.from)) handlers.onPeerLeave(packet.from);
+      if (peers.delete(packet.from)) handlers.onPeerLeave(packet.from, true);
       return;
     }
     if (packet.sys === "hb") {
@@ -226,6 +232,7 @@ export async function connectRoom(
     deliver(packet);
   };
 
+  let retry = 0;
   const listen = (next: WebSocket) => {
     next.onmessage = (event) => {
       if (gone) return;
@@ -239,22 +246,31 @@ export async function connectRoom(
     };
     next.onclose = () => {
       if (gone || next !== socket) return;
-      later(() => {
-        openSocket(topic)
-          .then((nextSocket) => {
-            if (gone) {
-              nextSocket.close();
-              return;
-            }
-            socket = nextSocket;
-            listen(nextSocket);
-            handlers.onStatus("live");
-          })
-          .catch(() => {
-            if (!gone) handlers.onStatus("error", "ارتباط اتاق قطع شد. یک بار دیگر وارد شوید.");
-          });
-      }, 1000);
+      handlers.onStatus("connecting", "ارتباط لحظه‌ای قطع شد. دوباره وصل می‌شویم…");
+      scheduleReconnect();
     };
+  };
+  const scheduleReconnect = () => {
+    if (gone) return;
+    const wait = Math.min(8000, 600 * 2 ** retry);
+    retry += 1;
+    later(() => {
+      openSocket(topic)
+        .then((nextSocket) => {
+          if (gone) {
+            nextSocket.close();
+            return;
+          }
+          retry = 0;
+          socket = nextSocket;
+          listen(nextSocket);
+          publishSys("hb");
+          handlers.onStatus("live");
+        })
+        .catch(() => {
+          if (!gone) scheduleReconnect();
+        });
+    }, wait);
   };
 
   const close = () => {
@@ -270,7 +286,7 @@ export async function connectRoom(
 
   listen(socket);
 
-  if (role === "host") {
+  if (role === "host" && !options?.resume) {
     publishSys("claim");
     const busy = await new Promise<boolean>((resolve) => {
       claimResult = resolve;
@@ -291,10 +307,10 @@ export async function connectRoom(
   sweep = window.setInterval(() => {
     const now = Date.now();
     for (const [peerId, seenAt] of peers) {
-      if (now - seenAt > PEER_TIMEOUT_MS) {
-        peers.delete(peerId);
-        handlers.onPeerLeave(peerId);
-      }
+        if (now - seenAt > PEER_TIMEOUT_MS) {
+          peers.delete(peerId);
+          handlers.onPeerLeave(peerId, false);
+        }
     }
     for (const [id, bucket] of partials) {
       if (now - bucket.at > 15_000) partials.delete(id);

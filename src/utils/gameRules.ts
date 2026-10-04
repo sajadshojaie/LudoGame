@@ -494,6 +494,40 @@ export function rematch(state: GameState, now: number): GameState {
   };
 }
 
+export function markPeerAway(state: GameState, peerId: string): GameState {
+  const player = state.players.find((item) => item.peerId === peerId && item.kind === "human" && item.connected);
+  if (!player) return state;
+  const players = state.players.map((item) => (item.peerId === peerId ? { ...item, connected: false } : item));
+  const current = state.players[state.currentPlayerIndex];
+  const pause = state.status === "playing" && state.phase === "roll" && current?.id === player.id;
+  return {
+    ...state,
+    revision: state.revision + 1,
+    players,
+    rollDeadline: pause ? 0 : state.rollDeadline,
+    log: withLog(state, "system", `ارتباط ${player.name} قطع شد. جایش حفظ است.`),
+  };
+}
+
+export function reattachHuman(state: GameState, playerId: string, peerId: string): GameState {
+  const player = state.players.find((item) => item.id === playerId && item.kind === "human");
+  if (!player) return state;
+  if (player.connected && player.peerId === peerId) return state;
+  const wasAway = !player.connected;
+  const players = state.players.map((item) =>
+    item.id === playerId ? { ...item, peerId, kind: "human" as const, connected: true } : item,
+  );
+  const current = players[state.currentPlayerIndex];
+  const arm = wasAway && state.status === "playing" && state.phase === "roll" && current?.id === playerId;
+  return {
+    ...state,
+    revision: state.revision + 1,
+    players,
+    rollDeadline: arm ? rollClock(players, state.currentPlayerIndex, Date.now(), Date.now(), true) : state.rollDeadline,
+    log: wasAway ? withLog(state, "system", `${player.name} برگشت.`) : state.log,
+  };
+}
+
 export function convertPeerToBot(state: GameState, peerId: string): GameState {
   const player = state.players.find((item) => item.peerId === peerId);
   if (!player || player.kind === "bot") return state;
@@ -528,6 +562,8 @@ export function applyIntent(state: GameState, intent: Intent, actorId: string, n
   if (intent.type === "pass") {
     if (actorId !== state.hostId && actorId !== state.players[state.currentPlayerIndex]?.id) return null;
     if (state.phase !== "roll" || state.status !== "playing" || now < state.busyUntil) return null;
+    const waiting = state.players[state.currentPlayerIndex];
+    if (waiting?.kind === "human" && !waiting.connected) return null;
     if (state.rollDeadline && now + 250 < state.rollDeadline) return null;
     const next = passRoll(state, now);
     return next.revision === state.revision ? null : next;
