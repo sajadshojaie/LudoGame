@@ -1,4 +1,3 @@
-import type { DataConnection, Peer } from "peerjs";
 import type { GameState, Intent } from "@/types/game";
 
 export type SyncStatus = "connecting" | "live" | "error";
@@ -32,14 +31,32 @@ export class RoomBusyError extends Error {
   }
 }
 
-const TURN_HOST = "staticauth.openrelay.metered.ca";
-const TURN_SECRET = "openrelayprojectsecret";
-const OPEN_TIMEOUT_MS = 12_000;
-const REDIAL_MS = 1400;
-const MAX_DIALS = 8;
+const RELAY = "https://ntfy.sh";
+const CHUNK_BYTES = 2800;
+const HEARTBEAT_MS = 8000;
+const PEER_TIMEOUT_MS = 22000;
+const CLAIM_WAIT_MS = 700;
 
-function roomPeerId(roomId: string): string {
-  return `manch-${roomId.trim().toUpperCase()}`;
+interface RelayPacket {
+  v: 1;
+  from: string;
+  sys?: "bye" | "hb" | "claim";
+  id?: string;
+  to?: string;
+  i?: number;
+  n?: number;
+  p?: string;
+}
+
+interface PartialMessage {
+  n: number;
+  parts: string[];
+  got: number;
+  at: number;
+}
+
+function topicFor(roomId: string): string {
+  return `manch-ludo-v1-${roomId.trim().toUpperCase()}`;
 }
 
 function isWire(data: unknown): data is WireMessage {
@@ -48,50 +65,54 @@ function isWire(data: unknown): data is WireMessage {
   return kind === "hello" || kind === "state" || kind === "intent" || kind === "reject";
 }
 
-function errorType(err: unknown): string {
-  if (err && typeof err === "object" && "type" in err && typeof (err as { type: unknown }).type === "string") {
-    return (err as { type: string }).type;
-  }
-  return "";
+function isPacket(data: unknown): data is RelayPacket {
+  if (!data || typeof data !== "object") return false;
+  const packet = data as RelayPacket;
+  return packet.v === 1 && typeof packet.from === "string";
 }
 
-async function iceConfig(): Promise<RTCConfiguration> {
-  const iceServers: RTCIceServer[] = [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun.cloudflare.com:3478" },
-    {
-      urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"],
-      username: "peerjs",
-      credential: "peerjsp",
-    },
-  ];
-  try {
-    const username = `${Math.floor(Date.now() / 1000) + 12 * 60 * 60}:manch`;
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(TURN_SECRET),
-      { name: "HMAC", hash: "SHA-1" },
-      false,
-      ["sign"],
-    );
-    const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(username)));
-    const credential = btoa(String.fromCharCode(...mac));
-    iceServers.push({
-      urls: [`turn:${TURN_HOST}:80?transport=tcp`, `turns:${TURN_HOST}:443?transport=tcp`],
-      username,
-      credential,
-    });
-  } catch {
-    // STUN and the PeerJS relay stay available when this credential cannot be built.
+function utf8Chunks(text: string, maxBytes: number): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  let bytes = 0;
+  for (const char of text) {
+    const size = new TextEncoder().encode(char).length;
+    if (current && bytes + size > maxBytes) {
+      chunks.push(current);
+      current = char;
+      bytes = size;
+    } else {
+      current += char;
+      bytes += size;
+    }
   }
-  return { iceServers };
+  if (current || chunks.length === 0) chunks.push(current);
+  return chunks;
 }
 
-function startupError(err: unknown): Error {
-  const type = errorType(err);
-  if (type === "unavailable-id") return new RoomBusyError();
-  if (type === "invalid-id") return new Error("کد اتاق نامعتبر است.");
-  return new Error("سرور اتصال آنلاین جواب نداد. اینترنت را چک کنید و دوباره تلاش کنید.");
+function openSocket(topic: string): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(`wss://ntfy.sh/${topic}/ws?since=10s`);
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      socket.close();
+      reject(new Error("اتصال به سرور اتاق برقرار نشد. اینترنت را چک کنید و دوباره تلاش کنید."));
+    }, 10_000);
+    socket.onopen = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve(socket);
+    };
+    socket.onerror = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      reject(new Error("اتصال به سرور اتاق برقرار نشد. اینترنت را چک کنید و دوباره تلاش کنید."));
+    };
+  });
 }
 
 export async function connectRoom(
@@ -100,18 +121,18 @@ export async function connectRoom(
   role: RoomRole,
 ): Promise<RoomConnection> {
   handlers.onStatus("connecting", role === "host" ? "در حال ساخت اتاق…" : "در حال پیدا کردن میزبان…");
-  const { Peer: PeerCtor } = await import("peerjs");
-  const roomPeer = roomPeerId(roomId);
-  const config = await iceConfig();
-  const peer = await openPeer(PeerCtor, role === "host" ? roomPeer : undefined, config);
-  const selfId = peer.id;
-  const links = new Map<string, DataConnection>();
-  const pending = new Set<string>();
-  const attempts = new Map<string, number>();
-  const ignored = new WeakSet<DataConnection>();
+  const topic = topicFor(roomId);
+  const selfId = `${role === "host" ? "h" : "g"}-${crypto.randomUUID()}`;
+  const peers = new Map<string, number>();
+  const partials = new Map<string, PartialMessage>();
+  const seen = new Set<string>();
   const timers = new Set<number>();
   let gone = false;
-  let signalDrops = 0;
+  let heartbeat = 0;
+  let sweep = 0;
+  let socket = await openSocket(topic);
+  let sendChain = Promise.resolve();
+  let claimResult: ((busy: boolean) => void) | null = null;
 
   const later = (fn: () => void, ms: number) => {
     const timer = window.setTimeout(() => {
@@ -121,171 +142,192 @@ export async function connectRoom(
     timers.add(timer);
   };
 
-  const preferOutgoing = (remoteId: string) => {
-    if (remoteId === roomPeer) return role === "guest";
-    if (role === "host") return false;
-    return selfId < remoteId;
+  const post = (raw: string) => {
+    const dropping = gone;
+    sendChain = sendChain
+      .then(async () => {
+        if (dropping) return;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const response = await fetch(`${RELAY}/${topic}`, { method: "POST", body: raw });
+          if (response.status === 429) {
+            await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1)));
+            continue;
+          }
+          if (!response.ok) throw new Error(String(response.status));
+          return;
+        }
+      })
+      .catch(() => {
+        if (!gone) handlers.onStatus("error", "فرستادن پیام به اتاق ممکن نشد. صفحه را باز نگه دارید.");
+      });
   };
 
-  const shouldDial = (remoteId: string) => {
-    if (gone || !remoteId || remoteId === selfId) return false;
-    if (links.get(remoteId)?.open || pending.has(remoteId)) return false;
-    if ((attempts.get(remoteId) ?? 0) >= MAX_DIALS) return false;
-    if (remoteId === roomPeer) return role === "guest";
-    if (role === "host") return false;
-    return selfId < remoteId;
+  const publishSys = (sys: "bye" | "hb" | "claim") => {
+    post(JSON.stringify({ v: 1, sys, from: selfId } satisfies RelayPacket));
   };
 
-  const dial = (remoteId: string) => {
-    if (!shouldDial(remoteId)) return;
-    attempts.set(remoteId, (attempts.get(remoteId) ?? 0) + 1);
-    pending.add(remoteId);
-    bind(peer.connect(remoteId, { reliable: true, serialization: "json" }), true);
+  const notePeer = (peerId: string) => {
+    if (!peerId || peerId === selfId) return;
+    const known = peers.has(peerId);
+    peers.set(peerId, Date.now());
+    if (!known) handlers.onPeerJoin(peerId);
   };
 
-  const forget = (conn: DataConnection) => {
-    pending.delete(conn.peer);
-    if (links.get(conn.peer) === conn) links.delete(conn.peer);
-  };
-
-  function bind(conn: DataConnection, outgoing: boolean) {
-    if (gone) {
-      conn.close();
+  const deliver = (packet: RelayPacket) => {
+    if (!packet.id || packet.i == null || packet.n == null || typeof packet.p !== "string") return;
+    if (seen.has(packet.id)) return;
+    let bucket = partials.get(packet.id);
+    if (!bucket) {
+      bucket = { n: packet.n, parts: [], got: 0, at: Date.now() };
+      partials.set(packet.id, bucket);
+    }
+    if (bucket.parts[packet.i] == null) {
+      bucket.parts[packet.i] = packet.p;
+      bucket.got += 1;
+    }
+    if (bucket.got < bucket.n) return;
+    partials.delete(packet.id);
+    seen.add(packet.id);
+    if (seen.size > 500) seen.delete(seen.values().next().value ?? "");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(bucket.parts.join(""));
+    } catch {
       return;
     }
-    const current = links.get(conn.peer);
-    if (current && current !== conn) {
-      const keepNew = outgoing === preferOutgoing(conn.peer);
-      if (!keepNew) {
-        ignored.add(conn);
-        pending.delete(conn.peer);
-        conn.close();
-        return;
-      }
-      ignored.add(current);
-      current.removeAllListeners();
-      current.close();
-    }
-    links.set(conn.peer, conn);
-    pending.delete(conn.peer);
-    let opened = false;
+    if (!isWire(parsed)) return;
+    if (packet.to && packet.to !== selfId) return;
+    handlers.onStatus("live");
+    handlers.onMessage(parsed, packet.from);
+  };
 
-    conn.on("open", () => {
-      if (gone || links.get(conn.peer) !== conn) return;
-      opened = true;
-      attempts.delete(conn.peer);
-      handlers.onStatus("live");
-      handlers.onPeerJoin(conn.peer);
-    });
-    conn.on("data", (data: unknown) => {
-      if (gone || links.get(conn.peer) !== conn || !isWire(data)) return;
-      handlers.onStatus("live");
-      handlers.onMessage(data, conn.peer);
-    });
-    conn.on("close", () => {
-      const currentLink = links.get(conn.peer) === conn;
-      forget(conn);
-      if (gone || ignored.has(conn)) return;
-      if (opened && currentLink) {
-        handlers.onPeerLeave(conn.peer);
+  const onRelay = (raw: string) => {
+    let packet: unknown;
+    try {
+      packet = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (!isPacket(packet) || packet.from === selfId) return;
+    if (claimResult && packet.sys !== "bye") claimResult(true);
+    if (packet.sys === "claim") {
+      notePeer(packet.from);
+      return;
+    }
+    if (packet.sys === "bye") {
+      if (peers.delete(packet.from)) handlers.onPeerLeave(packet.from);
+      return;
+    }
+    if (packet.sys === "hb") {
+      notePeer(packet.from);
+      return;
+    }
+    notePeer(packet.from);
+    deliver(packet);
+  };
+
+  const listen = (next: WebSocket) => {
+    next.onmessage = (event) => {
+      if (gone) return;
+      let data: { event?: string; message?: string };
+      try {
+        data = JSON.parse(String(event.data)) as { event?: string; message?: string };
+      } catch {
         return;
       }
-      later(() => dial(conn.peer), REDIAL_MS);
+      if (data.event === "message" && data.message) onRelay(data.message);
+    };
+    next.onclose = () => {
+      if (gone || next !== socket) return;
+      later(() => {
+        openSocket(topic)
+          .then((nextSocket) => {
+            if (gone) {
+              nextSocket.close();
+              return;
+            }
+            socket = nextSocket;
+            listen(nextSocket);
+            handlers.onStatus("live");
+          })
+          .catch(() => {
+            if (!gone) handlers.onStatus("error", "ارتباط اتاق قطع شد. یک بار دیگر وارد شوید.");
+          });
+      }, 1000);
+    };
+  };
+
+  const close = () => {
+    if (gone) return;
+    gone = true;
+    for (const timer of timers) window.clearTimeout(timer);
+    timers.clear();
+    if (heartbeat) window.clearInterval(heartbeat);
+    if (sweep) window.clearInterval(sweep);
+    socket.onclose = null;
+    socket.close();
+  };
+
+  listen(socket);
+
+  if (role === "host") {
+    publishSys("claim");
+    const busy = await new Promise<boolean>((resolve) => {
+      claimResult = resolve;
+      later(() => resolve(false), CLAIM_WAIT_MS);
     });
-    conn.on("iceStateChanged", (state) => {
-      if (state !== "failed" || opened || gone || ignored.has(conn)) return;
-      conn.close();
-    });
+    claimResult = null;
+    if (busy) {
+      publishSys("bye");
+      close();
+      throw new RoomBusyError();
+    }
   }
 
-  peer.on("connection", (conn) => bind(conn, false));
-  peer.on("disconnected", () => {
-    if (gone || peer.destroyed) return;
-    signalDrops += 1;
-    if (signalDrops > 4) {
-      handlers.onStatus("error", "ارتباط با سرور معرفی قطع شد. یک بار دیگر وارد اتاق شوید.");
-      return;
-    }
-    later(() => {
-      if (!peer.destroyed && peer.disconnected) peer.reconnect();
-    }, 800);
-  });
-  peer.on("open", () => {
-    signalDrops = 0;
-  });
-  peer.on("error", (err) => {
-    if (gone) return;
-    if (errorType(err) !== "peer-unavailable") return;
-    const missed = err.message.startsWith("Could not connect to peer ")
-      ? err.message.slice("Could not connect to peer ".length)
-      : "";
-    if (!missed) return;
-    const conn = links.get(missed);
-    if (conn && !conn.open) {
-      ignored.add(conn);
-      forget(conn);
-      conn.close();
-    } else {
-      pending.delete(missed);
-    }
-    if ((attempts.get(missed) ?? 0) >= MAX_DIALS && missed === roomPeer) {
-      handlers.onStatus("error", "میزبان پیدا نشد. کد را چک کنید و هر دو صفحه را باز نگه دارید.");
-      return;
-    }
-    later(() => dial(missed), REDIAL_MS);
-  });
+  heartbeat = window.setInterval(() => {
+    if (!gone) publishSys("hb");
+  }, HEARTBEAT_MS);
 
-  if (role === "host") handlers.onStatus("live", "اتاق آماده است. کد را برای دوستانتان بفرستید.");
-  else dial(roomPeer);
+  sweep = window.setInterval(() => {
+    const now = Date.now();
+    for (const [peerId, seenAt] of peers) {
+      if (now - seenAt > PEER_TIMEOUT_MS) {
+        peers.delete(peerId);
+        handlers.onPeerLeave(peerId);
+      }
+    }
+    for (const [id, bucket] of partials) {
+      if (now - bucket.at > 15_000) partials.delete(id);
+    }
+  }, 4000);
+
+  publishSys("hb");
+  handlers.onStatus("live", role === "host" ? "اتاق آماده است. کد را برای دوستتان بفرستید." : undefined);
 
   return {
     selfId,
     send: (message, target) => {
-      const targets = target ? [links.get(target)].filter((conn): conn is DataConnection => Boolean(conn)) : [...links.values()];
-      for (const conn of targets) {
-        if (conn.open) conn.send(message);
-      }
+      const payload = JSON.stringify(message);
+      const parts = utf8Chunks(payload, CHUNK_BYTES);
+      const id = crypto.randomUUID();
+      parts.forEach((part, index) => {
+        const raw = JSON.stringify({
+          v: 1,
+          id,
+          from: selfId,
+          to: target,
+          i: index,
+          n: parts.length,
+          p: part,
+        } satisfies RelayPacket);
+        post(raw);
+      });
     },
-    ensurePeer: (peerId) => dial(peerId),
+    ensurePeer: () => {},
     leave: () => {
-      gone = true;
-      for (const timer of timers) window.clearTimeout(timer);
-      timers.clear();
-      for (const conn of links.values()) {
-        ignored.add(conn);
-        conn.removeAllListeners();
-        conn.close();
-      }
-      links.clear();
-      peer.removeAllListeners();
-      if (!peer.destroyed) peer.destroy();
+      publishSys("bye");
+      close();
     },
-    peerIds: () => [...links.values()].filter((conn) => conn.open).map((conn) => conn.peer),
+    peerIds: () => [...peers.keys()],
   };
-}
-
-function openPeer(PeerCtor: typeof Peer, id: string | undefined, config: RTCConfiguration): Promise<Peer> {
-  return new Promise((resolve, reject) => {
-    const peer = id ? new PeerCtor(id, { debug: 0, config }) : new PeerCtor({ debug: 0, config });
-    let settled = false;
-    const finish = (ok: boolean, value: Peer | Error) => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      peer.off("open", onOpen);
-      peer.off("error", onError);
-      if (ok) resolve(value as Peer);
-      else {
-        if (!peer.destroyed) peer.destroy();
-        reject(value);
-      }
-    };
-    const onOpen = () => finish(true, peer);
-    const onError = (err: unknown) => finish(false, startupError(err));
-    const timer = window.setTimeout(() => {
-      finish(false, new Error("سرور اتصال آنلاین جواب نداد. اینترنت را چک کنید و دوباره تلاش کنید."));
-    }, OPEN_TIMEOUT_MS);
-    peer.on("open", onOpen);
-    peer.on("error", onError);
-  });
 }
