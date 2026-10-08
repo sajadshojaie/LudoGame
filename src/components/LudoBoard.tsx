@@ -355,7 +355,7 @@ function TokenSprite({
       aria-label={`${theme.label}، مهره ${token.index + 1}${legal ? "، قابل حرکت" : ""}`}
     >
       <span className="token-shadow" />
-      {token.progress === 0 ? <span className="token-pad" /> : null}
+      {token.progress >= 0 ? <span className="token-pad" /> : null}
       {legal ? <span className="token-ring" /> : null}
       <span className="token-rot" style={{ transform: `rotate(${pose.heading}deg)` }}>
         <Airplane color={theme.hex} deep={theme.deep} soft={theme.soft} />

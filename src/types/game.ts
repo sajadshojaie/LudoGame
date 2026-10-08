@@ -24,8 +24,8 @@ export interface Token {
   /**
    * -1 yard
    * 0 .. trackLength-1 shared track (0 is this seat's start)
-   * trackLength .. trackLength+homeLength-1 home lane
-   * trackLength+homeLength finished in the center
+   * trackLength .. trackLength+homeLength-1 colored home lane.
+   * A token is finished when it parks in that lane, from the last house backward.
    */
   progress: number;
 }
@@ -76,6 +76,7 @@ export interface GameState {
 export interface SeatSetup {
   name: string;
   kind: "human" | "bot";
+  seat?: number;
 }
 
 export type Intent =
@@ -91,6 +92,7 @@ export interface LegalMove {
   from: number;
   to: number;
   captures: string[];
+  finishes: boolean;
 }
 
 export interface Point {

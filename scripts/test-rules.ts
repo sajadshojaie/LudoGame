@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { buildLayout, finishProgress, homeLength, minCenterDistance, seatPlan, trackLength } from "../src/utils/boardGeometry.ts";
+import { buildLayout, homeLength, minCenterDistance, seatOrder, seatPlan, trackLength } from "../src/utils/boardGeometry.ts";
 import {
   addBot,
+  addHuman,
   applyIntent,
   applyMove,
   applyRoll,
@@ -13,6 +14,7 @@ import {
   createLobby,
   markPeerAway,
   reattachHuman,
+  tokenParked,
 } from "../src/utils/gameRules.ts";
 import type { PlayerCount } from "../src/types/game.ts";
 
@@ -39,9 +41,13 @@ for (let i = 0; i < classicCells.length; i++) {
 
 assert.equal(trackLength(2), 56);
 assert.equal(trackLength(3), 56);
-assert.equal(homeLength(2), 6);
+assert.equal(homeLength(2), 5);
+assert.equal(homeLength(5), 4);
 assert.deepEqual(seatPlan(2), [0, 2]);
 assert.deepEqual(seatPlan(3), [0, 1, 2]);
+assert.deepEqual(seatOrder(2, 3), [3, 1]);
+assert.deepEqual(seatOrder(3, 1), [1, 2, 3]);
+assert.deepEqual(seatOrder(4, 2), [2, 3, 0, 1]);
 assert.equal(buildLayout(2).track.length, 56);
 assert.equal(buildLayout(3).homes.length, 4);
 
@@ -238,23 +244,39 @@ function fresh(count: PlayerCount = 4) {
 
 {
   let state = fresh(4);
-  const goal = finishProgress(4);
+  const len = trackLength(4);
   const red = state.players[0];
+  const first = state.tokens.find((item) => item.playerId === red.id && item.index === 0)!;
+  const second = state.tokens.find((item) => item.playerId === red.id && item.index === 1)!;
   state = {
     ...state,
     phase: "move",
     dice: 6,
-    tokens: state.tokens.map((token) =>
-      token.playerId === red.id && token.index === 0 ? { ...token, progress: goal - 2 } : token,
-    ),
+    tokens: state.tokens.map((token) => (token.id === first.id ? { ...token, progress: len - 1 } : token)),
   };
-  const token = state.tokens.find((item) => item.playerId === red.id && item.index === 0)!;
-  assert.equal(legalMoves(state).some((move) => move.tokenId === token.id), false);
-  state = { ...state, dice: 2 };
-  const exact = legalMoves(state).find((move) => move.tokenId === token.id);
-  assert.equal(exact?.to, goal);
-  state = applyMove(state, token.id, 0);
-  assert.equal(state.tokens.find((item) => item.id === token.id)?.progress, goal);
+  assert.equal(legalMoves(state).some((move) => move.tokenId === first.id), false);
+  state = { ...state, dice: 5 };
+  const exact = legalMoves(state).find((move) => move.tokenId === first.id);
+  assert.equal(exact?.to, len + 4);
+  assert.equal(exact?.finishes, true);
+  state = applyMove(state, first.id, 0);
+  assert.equal(tokenParked(state, first.id), true);
+
+  state = {
+    ...state,
+    phase: "move",
+    dice: 5,
+    currentPlayerIndex: 0,
+    tokens: state.tokens.map((token) => (token.id === second.id ? { ...token, progress: len - 1 } : token)),
+  };
+  assert.equal(legalMoves(state).some((move) => move.tokenId === second.id), false);
+  state = { ...state, dice: 4 };
+  const behind = legalMoves(state).find((move) => move.tokenId === second.id);
+  assert.equal(behind?.to, len + 3);
+  assert.equal(behind?.finishes, true);
+  state = applyMove(state, second.id, 0);
+  assert.equal(tokenParked(state, second.id), true);
+  assert.equal(state.tokens.find((item) => item.id === first.id)?.progress, len + 4);
 }
 
 {
@@ -284,6 +306,47 @@ function fresh(count: PlayerCount = 4) {
     [...new Set(started.tokens.map((token) => token.seat))].sort(),
     [0, 2],
   );
+}
+
+{
+  const match = createLocalMatch(
+    2,
+    [
+      { name: "ساجد", kind: "human", seat: 3 },
+      { name: "ربات", kind: "bot", seat: 1 },
+    ],
+    "ساجد",
+  );
+  assert.deepEqual(match.players.map((player) => player.seat), [3, 1]);
+  const lobby = createLobby({
+    roomId: "RED1",
+    hostId: "host",
+    hostName: "ساجد",
+    count: 2,
+    peerId: "host",
+    hostSeat: 3,
+  });
+  assert.equal(lobby.players[0]?.seat, 3);
+  const joined = addHuman(
+    lobby,
+    { id: "guest", name: "نیما", seat: 3, kind: "human", peerId: "g", connected: true },
+    3,
+  );
+  assert.equal(joined?.players[1]?.seat, 1);
+  const open = createLobby({
+    roomId: "OPEN",
+    hostId: "host",
+    hostName: "ساجد",
+    count: 4,
+    peerId: "host",
+    hostSeat: 0,
+  });
+  const claimed = addHuman(
+    open,
+    { id: "guest", name: "نیما", seat: 3, kind: "human", peerId: "g", connected: true },
+    3,
+  );
+  assert.equal(claimed?.players[1]?.seat, 3);
 }
 
 {

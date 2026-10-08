@@ -45,44 +45,44 @@ export function createSoundboard(): Soundboard {
     osc.stop(t + dur + 0.02);
   }
 
-  function clack(when: number, loud: number, bright: number) {
+  function diceHit(when: number, loud: number, toneHz: number) {
     const audio = ac();
     if (!audio) return;
     const t = audio.currentTime + when;
-    const dur = 0.016;
+    const dur = 0.04;
     const length = Math.max(1, Math.floor(audio.sampleRate * dur));
     const buffer = audio.createBuffer(1, length, audio.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < length; i++) {
-      const env = Math.exp(-i / (audio.sampleRate * 0.0022));
+      const env = Math.pow(1 - i / length, 1.7);
       data[i] = (Math.random() * 2 - 1) * env;
     }
     const src = audio.createBufferSource();
     src.buffer = buffer;
-    const body = audio.createBiquadFilter();
-    body.type = "bandpass";
-    body.frequency.value = 700 + bright * 1600;
-    body.Q.value = 1.4;
+    const band = audio.createBiquadFilter();
+    band.type = "bandpass";
+    band.frequency.setValueAtTime(toneHz, t);
+    band.Q.value = 0.85;
     const amp = audio.createGain();
     amp.gain.setValueAtTime(loud, t);
     amp.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
-    src.connect(body);
-    body.connect(amp);
+    src.connect(band);
+    band.connect(amp);
     amp.connect(audio.destination);
     src.start(t);
     src.stop(t + 0.05);
 
-    const knock = audio.createOscillator();
-    const knockAmp = audio.createGain();
-    knock.type = "triangle";
-    knock.frequency.setValueAtTime(180 + bright * 70, t);
-    knock.frequency.exponentialRampToValueAtTime(60, t + 0.04);
-    knockAmp.gain.setValueAtTime(loud * 0.55, t);
-    knockAmp.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-    knock.connect(knockAmp);
-    knockAmp.connect(audio.destination);
-    knock.start(t);
-    knock.stop(t + 0.055);
+    const body = audio.createOscillator();
+    const bodyAmp = audio.createGain();
+    body.type = "sine";
+    body.frequency.setValueAtTime(Math.max(160, toneHz * 0.18), t);
+    body.frequency.exponentialRampToValueAtTime(110, t + 0.035);
+    bodyAmp.gain.setValueAtTime(loud * 0.35, t);
+    bodyAmp.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+    body.connect(bodyAmp);
+    bodyAmp.connect(audio.destination);
+    body.start(t);
+    body.stop(t + 0.045);
   }
 
   return {
@@ -100,11 +100,16 @@ export function createSoundboard(): Soundboard {
       ac();
     },
     dice: () => {
-      const hits = [0, 0.045, 0.09, 0.15, 0.22, 0.31, 0.42, 0.55, 0.7];
-      hits.forEach((when, index) => {
-        const last = index === hits.length - 1;
-        const fade = 1 - index / hits.length;
-        clack(when, last ? 0.28 : 0.08 + fade * 0.16, last ? 0.15 : Math.random());
+      const hits: Array<[number, number, number]> = [
+        [0, 0.07, 1680],
+        [0.055, 0.05, 1320],
+        [0.11, 0.036, 1040],
+        [0.18, 0.024, 860],
+        [0.27, 0.016, 720],
+      ];
+      hits.forEach(([when, loud, toneHz]) => {
+        const jitter = (Math.random() - 0.5) * 0.014;
+        diceHit(Math.max(0, when + jitter), loud, toneHz * (0.94 + Math.random() * 0.1));
       });
     },
     step: () => tone(640, 0.07, "sine", 0.05, 880),

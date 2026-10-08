@@ -18,6 +18,24 @@ export function seatPlan(count: PlayerCount): number[] {
   return Array.from({ length: count }, (_, index) => index);
 }
 
+/** Colors a player may pick. Classic boards keep the four corners. */
+export function seatChoices(count: PlayerCount): number[] {
+  const total = count <= 4 ? 4 : count;
+  return Array.from({ length: total }, (_, index) => index);
+}
+
+/** Seats around the chosen color. Two players stay opposite. */
+export function seatOrder(count: PlayerCount, first: number): number[] {
+  const choices = seatChoices(count);
+  const start = choices.includes(first) ? first : choices[0];
+  if (count === 2) return [start, (start + 2) % 4];
+  if (count === 3) return [start, (start + 1) % 4, (start + 2) % 4];
+  const rest = choices.filter((seat) => seat !== start);
+  const span = choices.length;
+  rest.sort((a, b) => ((a - start + span) % span) - ((b - start + span) % span));
+  return [start, ...rest].slice(0, count);
+}
+
 /** Shared-track cells contributed by each seat. Classic arms are longer. */
 export function trackPerPlayer(count: PlayerCount): number {
   if (count <= 4) return 14;
@@ -26,7 +44,7 @@ export function trackPerPlayer(count: PlayerCount): number {
 }
 
 export function homeLength(count: PlayerCount): number {
-  return count <= 4 ? 6 : 4;
+  return count <= 4 ? 5 : 4;
 }
 
 export function trackLength(count: PlayerCount): number {
@@ -34,8 +52,9 @@ export function trackLength(count: PlayerCount): number {
   return trackPerPlayer(count) * count;
 }
 
+/** Innermost colored house. The first token to finish stops here. */
 export function finishProgress(count: PlayerCount): number {
-  return trackLength(count) + homeLength(count);
+  return trackLength(count) + homeLength(count) - 1;
 }
 
 const CLASSIC_PATH: Array<[number, number]> = [
@@ -50,10 +69,10 @@ const CLASSIC_PATH: Array<[number, number]> = [
 ];
 
 const CLASSIC_HOMES: Array<Array<[number, number]>> = [
-  [[7, 1], [7, 2], [7, 3], [7, 4], [7, 5], [7, 6]],
-  [[1, 7], [2, 7], [3, 7], [4, 7], [5, 7], [6, 7]],
-  [[7, 13], [7, 12], [7, 11], [7, 10], [7, 9], [7, 8]],
-  [[13, 7], [12, 7], [11, 7], [10, 7], [9, 7], [8, 7]],
+  [[7, 1], [7, 2], [7, 3], [7, 4], [7, 5]],
+  [[1, 7], [2, 7], [3, 7], [4, 7], [5, 7]],
+  [[7, 13], [7, 12], [7, 11], [7, 10], [7, 9]],
+  [[13, 7], [12, 7], [11, 7], [10, 7], [9, 7]],
 ];
 
 const CLASSIC_YARDS: Array<{ row: number; col: number }> = [
@@ -160,7 +179,7 @@ function buildClassic(playerCount: PlayerCount): BoardLayout {
     viewBox: VIEW,
     shape: "square",
     trackLength: 56,
-    homeLength: 6,
+    homeLength: 5,
     cellSize: size,
     track,
     homes,

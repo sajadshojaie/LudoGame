@@ -22,6 +22,14 @@ body {
   color: #16324d;
 }
 
+html.dark body {
+  background:
+    radial-gradient(420px 180px at 12% 0%, rgba(80, 120, 180, 0.22), transparent 70%),
+    radial-gradient(380px 160px at 90% 10%, rgba(240, 180, 60, 0.12), transparent 68%),
+    linear-gradient(180deg, #101820 0%, #182430 55%, #0e141c 100%);
+  color: #e7eef6;
+}
+
 .font-display {
   font-family: var(--font-rubik), sans-serif;
   font-weight: 800;
@@ -53,27 +61,13 @@ body {
 .board-shell {
   aspect-ratio: 1;
   width: 100%;
-  padding: clamp(10px, 2.4%, 20px);
-  border-radius: clamp(1rem, 2vw, 1.7rem);
-  background:
-    radial-gradient(circle at 12px 12px, #f8e7c4 0 3px, #8d5a2b 4px 6px, transparent 7px),
-    radial-gradient(circle at calc(100% - 12px) 12px, #f8e7c4 0 3px, #8d5a2b 4px 6px, transparent 7px),
-    radial-gradient(circle at 12px calc(100% - 12px), #f8e7c4 0 3px, #8d5a2b 4px 6px, transparent 7px),
-    radial-gradient(circle at calc(100% - 12px) calc(100% - 12px), #f8e7c4 0 3px, #8d5a2b 4px 6px, transparent 7px),
-    linear-gradient(165deg, rgba(255, 236, 196, 0.42), transparent 30%),
-    repeating-linear-gradient(
-      92deg,
-      #6e4120 0px,
-      #c4894a 3px,
-      #8d5a2e 7px,
-      #4e2c14 11px,
-      #b87a42 15px,
-      #704221 19px
-    );
+  padding: clamp(8px, 1.5%, 14px);
+  border-radius: clamp(1.15rem, 2.2vw, 1.7rem);
+  background: linear-gradient(165deg, #3a4456 0%, #232b38 42%, #151b24 100%);
   box-shadow:
-    0 0 0 3px #3d2614,
-    inset 0 1px 0 rgba(255, 236, 196, 0.45),
-    0 18px 36px rgba(48, 24, 8, 0.28);
+    0 0 0 1px rgba(255, 255, 255, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 18px 36px rgba(12, 18, 28, 0.28);
 }
 
 .board-frame {
@@ -81,11 +75,10 @@ body {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  border-radius: 0.75rem;
+  border-radius: 0.85rem;
   box-shadow:
-    inset 0 0 0 2px #fff8ea,
-    inset 0 0 0 7px #d7b072,
-    inset 0 0 0 9px #6a4122;
+    inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+    inset 0 0 0 6px #10161f;
 }
 
 .board-frame svg {
@@ -369,6 +362,66 @@ body {
 .chip-on {
   background: #ffffff;
   box-shadow: 0 0 0 1px rgba(240, 180, 40, 0.7);
+}
+
+html.dark .text-\[\#14324f\],
+html.dark .text-\[\#16324d\] {
+  color: #e8f1f8;
+}
+
+html.dark .text-\[\#24506f\],
+html.dark .text-\[\#5a7e99\],
+html.dark .text-\[\#3d6484\] {
+  color: #9db4c8;
+}
+
+html.dark .bg-white,
+html.dark .bg-white\/90,
+html.dark .bg-white\/80,
+html.dark .bg-white\/75,
+html.dark .bg-white\/70,
+html.dark .bg-white\/60,
+html.dark .bg-white\/55 {
+  background-color: rgba(22, 32, 46, 0.92);
+}
+
+html.dark .bg-\[\#eef6fb\],
+html.dark .bg-\[\#f4f9fd\] {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+html.dark .border-\[\#14324f\]\/10,
+html.dark .ring-white {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+html.dark .field,
+html.dark .btn-ghost,
+html.dark .count-btn,
+html.dark .icon-btn,
+html.dark .chip,
+html.dark .move-btn {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e7eef6;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+html.dark .seg {
+  color: #b7c9d8;
+}
+
+html.dark .seg-on {
+  background: #243246;
+  color: #f4f7fb;
+}
+
+html.dark .dice-result {
+  color: #f4f7fb;
+}
+
+html.dark .lobby-card {
+  background: rgba(16, 24, 36, 0.88);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -14,6 +14,8 @@ import {
   TOKENS_PER_PLAYER,
   finishProgress,
   homeLength,
+  seatChoices,
+  seatOrder,
   seatPlan,
   trackLength,
   buildLayout,
@@ -56,11 +58,11 @@ export function createTokens(players: Player[]): Token[] {
 }
 
 export function createLocalMatch(count: PlayerCount, seats: SeatSetup[], hostName: string): GameState {
-  const plan = seatPlan(count);
+  const fallback = seatPlan(count);
   const players: Player[] = seats.slice(0, count).map((seat, index) => ({
     id: index === 0 ? "local-you" : createId(seat.kind === "bot" ? "bot" : "local"),
     name: (index === 0 ? hostName : seat.name).trim() || defaultName(index, seat.kind),
-    seat: plan[index] ?? index,
+    seat: seat.seat ?? fallback[index] ?? index,
     kind: index === 0 ? "human" : seat.kind,
     peerId: null,
     connected: true,
@@ -82,11 +84,13 @@ export function createLobby(options: {
   hostName: string;
   count: PlayerCount;
   peerId: string | null;
+  hostSeat?: number;
 }): GameState {
+  const choices = seatChoices(options.count);
   const host: Player = {
     id: options.hostId,
     name: options.hostName.trim() || "میزبان",
-    seat: 0,
+    seat: choices.includes(options.hostSeat ?? 0) ? (options.hostSeat ?? 0) : choices[0],
     kind: "human",
     peerId: options.peerId,
     connected: true,
@@ -143,7 +147,8 @@ function baseState(partial: {
 
 function nextOpenSeat(state: GameState): number {
   const used = new Set(state.players.map((player) => player.seat));
-  return seatPlan(state.maxPlayers).find((seat) => !used.has(seat)) ?? state.players.length;
+  const first = state.players[0]?.seat ?? 0;
+  return seatOrder(state.maxPlayers, first).find((seat) => !used.has(seat)) ?? state.players.length;
 }
 
 function defaultName(index: number, kind: "human" | "bot"): string {
@@ -159,17 +164,48 @@ function withLog(state: GameState, tone: LogTone, text: string): LogEntry[] {
   return [...state.log, entry(tone, text)].slice(-36);
 }
 
-export function finishLine(state: GameState): number {
-  return finishProgress(state.maxPlayers);
+function homeIndexOf(progress: number, count: PlayerCount): number | null {
+  const len = trackLength(count);
+  const home = homeLength(count);
+  if (progress < len || progress >= len + home) return null;
+  return progress - len;
 }
 
-export function isFinishedProgress(progress: number, count: PlayerCount): boolean {
-  return progress >= finishProgress(count);
+/** Tokens sitting in a solid row from the innermost colored house backward. */
+export function parkedTokenIds(tokens: Token[], playerId: string, count: PlayerCount): Set<string> {
+  const houses = homeLength(count);
+  const at = new Map<number, string>();
+  for (const token of tokens) {
+    if (token.playerId !== playerId) continue;
+    const index = homeIndexOf(token.progress, count);
+    if (index == null) continue;
+    at.set(index, token.id);
+  }
+  const parked = new Set<string>();
+  for (let slot = houses - 1; slot >= 0; slot--) {
+    const id = at.get(slot);
+    if (!id) break;
+    parked.add(id);
+  }
+  return parked;
+}
+
+export function tokenParked(state: GameState, tokenId: string): boolean {
+  const token = state.tokens.find((item) => item.id === tokenId);
+  if (!token) return false;
+  return parkedTokenIds(state.tokens, token.playerId, state.maxPlayers).has(tokenId);
+}
+
+function goalProgressFor(tokens: Token[], token: Token, count: PlayerCount): number {
+  const parked = parkedTokenIds(tokens, token.playerId, count);
+  parked.delete(token.id);
+  const goalIndex = homeLength(count) - 1 - parked.size;
+  return trackLength(count) + Math.max(0, goalIndex);
 }
 
 export function playerFinished(state: GameState, playerId: string): boolean {
   const mine = state.tokens.filter((token) => token.playerId === playerId);
-  return mine.length === TOKENS_PER_PLAYER && mine.every((token) => isFinishedProgress(token.progress, state.maxPlayers));
+  return mine.length === TOKENS_PER_PLAYER && parkedTokenIds(state.tokens, playerId, state.maxPlayers).size === TOKENS_PER_PLAYER;
 }
 
 export function seatOf(state: GameState, playerId: string): number {
@@ -198,29 +234,34 @@ export function legalMoves(state: GameState, dice = state.dice): LegalMove[] {
   const player = state.players[state.currentPlayerIndex];
   if (!player || playerFinished(state, player.id)) return [];
   const len = trackLength(state.maxPlayers);
-  const goal = finishLine(state);
   const moves: LegalMove[] = [];
 
   for (const token of state.tokens) {
     if (token.playerId !== player.id) continue;
-    if (isFinishedProgress(token.progress, state.maxPlayers)) continue;
+    if (parkedTokenIds(state.tokens, player.id, state.maxPlayers).has(token.id)) continue;
 
     if (token.progress < 0) {
       if (dice !== 6) continue;
       const index = layoutOf(state.maxPlayers).starts[token.seat];
-      moves.push({ tokenId: token.id, from: -1, to: 0, captures: capturesOn(state, token, index, state.tokens) });
+      moves.push({ tokenId: token.id, from: -1, to: 0, captures: capturesOn(state, token, index, state.tokens), finishes: false });
       continue;
     }
 
     const dest = token.progress + dice;
-    if (dest > goal) continue;
+    const goal = goalProgressFor(state.tokens, token, state.maxPlayers);
+    let limit = goal;
+    for (const other of state.tokens) {
+      if (other.id === token.id || other.playerId !== token.playerId || other.progress < 0) continue;
+      if (other.progress > token.progress && other.progress <= goal) limit = Math.min(limit, other.progress - 1);
+    }
+    if (dest > limit) continue;
 
     const captures: string[] = [];
     if (dest < len) {
       const index = (layoutOf(state.maxPlayers).starts[token.seat] + dest) % len;
       captures.push(...capturesOn(state, token, index, state.tokens));
     }
-    moves.push({ tokenId: token.id, from: token.progress, to: dest, captures });
+    moves.push({ tokenId: token.id, from: token.progress, to: dest, captures, finishes: dest === goal });
   }
   return moves;
 }
@@ -232,7 +273,7 @@ function nextPlayerIndex(state: GameState, from: number, tokens: Token[], rankin
     const player = state.players[index];
     const done =
       rankings.includes(player.id) ||
-      tokens.filter((token) => token.playerId === player.id).every((token) => isFinishedProgress(token.progress, state.maxPlayers));
+      parkedTokenIds(tokens, player.id, state.maxPlayers).size === TOKENS_PER_PLAYER;
     if (!done) return index;
   }
   return from;
@@ -353,7 +394,7 @@ export function applyMove(state: GameState, tokenId: string, now: number): GameS
 
   const bits = [`${player.name} یک مهره را جلو برد.`];
   if (move.from < 0) bits[0] = `${player.name} یک مهره را از خانه بیرون آورد.`;
-  if (isFinishedProgress(move.to, state.maxPlayers)) bits.push("به مرکز رسید.");
+  if (move.finishes) bits.push("در خانه رنگی نشست.");
   if (capturedNames.length) bits.push(`${capturedNames.join(" و ")} را زد.`);
   if (justFinished) bits.push(`${player.name} نفر ${rankings.indexOf(player.id) + 1} شد.`);
   if (bonus && state.dice === 6) bits.push("یک تاس دیگر.");
@@ -428,11 +469,15 @@ export function addBot(state: GameState): GameState {
   };
 }
 
-export function addHuman(state: GameState, player: Player): GameState | null {
+export function addHuman(state: GameState, player: Player, requestedSeat?: number): GameState | null {
   if (state.status !== "lobby") return null;
   if (state.players.some((item) => item.id === player.id || item.peerId === player.peerId)) return state;
   if (state.players.length >= state.maxPlayers) return null;
-  const seated: Player = { ...player, seat: nextOpenSeat(state), kind: "human", connected: true };
+  const used = new Set(state.players.map((item) => item.seat));
+  const wanted = requestedSeat != null && seatChoices(state.maxPlayers).includes(requestedSeat) && !used.has(requestedSeat)
+    ? requestedSeat
+    : nextOpenSeat(state);
+  const seated: Player = { ...player, seat: wanted, kind: "human", connected: true };
   const players = [...state.players, seated];
   return {
     ...state,
@@ -640,9 +685,8 @@ function rollIndex(spanCount: number): number {
 
 export function describeMove(state: GameState, token: Token): string {
   const len = trackLength(state.maxPlayers);
-  const home = homeLength(state.maxPlayers);
   if (token.progress < 0) return "خروج از خانه";
-  if (token.progress >= len + home) return "رسیده";
+  if (parkedTokenIds(state.tokens, token.playerId, state.maxPlayers).has(token.id)) return "نشسته";
   if (token.progress >= len) return "مسیر خانه";
   if (token.progress === 0) return "ترک شروع";
   if (len - token.progress <= 6) return "نزدیک خانه";

@@ -4,7 +4,7 @@ export type SyncStatus = "connecting" | "live" | "error";
 export type RoomRole = "host" | "guest";
 
 export type WireMessage =
-  | { kind: "hello"; playerId: string; name: string }
+  | { kind: "hello"; playerId: string; name: string; seat?: number }
   | { kind: "state"; state: GameState }
   | { kind: "intent"; intent: Intent; actorId: string }
   | { kind: "reject"; reason: string };

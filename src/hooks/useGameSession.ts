@@ -16,7 +16,7 @@ import {
   createLobby,
   createLocalMatch,
   hopDuration,
-  isFinishedProgress,
+  tokenParked,
   legalMoves,
   roomCode,
 } from "@/utils/gameRules";
@@ -74,8 +74,8 @@ export interface SessionController {
   inputLocked: boolean;
   offlinePeerIds: string[];
   startLocal: (count: PlayerCount, seats: SeatSetup[], name: string) => void;
-  createOnline: (count: PlayerCount, name: string) => Promise<void>;
-  joinOnline: (code: string, name: string) => Promise<void>;
+  createOnline: (count: PlayerCount, name: string, seat: number) => Promise<void>;
+  joinOnline: (code: string, name: string, seat: number) => Promise<void>;
   act: (intent: Intent) => void;
   leave: () => void;
   toggleSound: () => void;
@@ -105,7 +105,7 @@ export function useGameSession(): SessionController {
   const seenMove = useRef(0);
   const winPlayed = useRef(false);
   const readyRef = useRef(false);
-  const joinHelloRef = useRef<{ playerId: string; name: string } | null>(null);
+  const joinHelloRef = useRef<{ playerId: string; name: string; seat?: number } | null>(null);
   const resumedRef = useRef(false);
 
   const commit = useCallback((next: GameState | null) => {
@@ -122,7 +122,7 @@ export function useGameSession(): SessionController {
     if (!hello) return;
     if (hostRef.current && stateRef.current?.players.some((player) => player.id === hello.playerId && player.connected)) return;
     connRef.current?.send(
-      { kind: "hello", playerId: hello.playerId, name: hello.name },
+      { kind: "hello", playerId: hello.playerId, name: hello.name, seat: hello.seat },
       target,
     );
   }, []);
@@ -160,7 +160,7 @@ export function useGameSession(): SessionController {
       seenRoll.current = current.rollId;
       if (current.dice != null) {
         audio?.dice();
-        if (current.dice === 6) audio?.six(0.82);
+        if (current.dice === 6) audio?.six(0.42);
       }
     }
     if (current.lastMove && current.lastMove.id !== seenMove.current) {
@@ -170,7 +170,7 @@ export function useGameSession(): SessionController {
       for (let i = 0; i < hops; i++) window.setTimeout(() => audio?.step(), i * HOP_MS);
       if (move.capturedIds.length)
         window.setTimeout(() => audio?.capture(), hops * HOP_MS);
-      if (isFinishedProgress(move.to, current.maxPlayers)) {
+      if (tokenParked(current, move.tokenId)) {
         window.setTimeout(() => audio?.arrive(), hopDuration(move.from, move.to));
       }
     }
@@ -178,7 +178,7 @@ export function useGameSession(): SessionController {
       if (!winPlayed.current) {
         winPlayed.current = true;
         const wait =
-          current.lastMove && isFinishedProgress(current.lastMove.to, current.maxPlayers)
+          current.lastMove && tokenParked(current, current.lastMove.tokenId)
             ? hopDuration(current.lastMove.from, current.lastMove.to) + 700
             : 0;
         window.setTimeout(() => audio?.win(), wait);
@@ -301,14 +301,18 @@ export function useGameSession(): SessionController {
           publish(prev, peerId);
           return;
         }
-        const next = addHuman(prev, {
-          id: message.playerId,
-          name: message.name.trim().slice(0, 18) || "مهمان",
-          seat: prev.players.length,
-          kind: "human",
-          peerId,
-          connected: true,
-        });
+        const next = addHuman(
+          prev,
+          {
+            id: message.playerId,
+            name: message.name.trim().slice(0, 18) || "مهمان",
+            seat: message.seat ?? prev.players.length,
+            kind: "human",
+            peerId,
+            connected: true,
+          },
+          message.seat,
+        );
         if (!next) {
           connRef.current?.send({ kind: "reject", reason: "این اتاق پر است." }, peerId);
           return;
@@ -507,7 +511,7 @@ export function useGameSession(): SessionController {
   );
 
   const createOnline = useCallback(
-    async (count: PlayerCount, name: string) => {
+    async (count: PlayerCount, name: string, seat: number) => {
       setError(null);
       setWaiting(true);
       setOnline(true);
@@ -527,6 +531,7 @@ export function useGameSession(): SessionController {
             hostName: name,
             count,
             peerId: connection.selfId,
+            hostSeat: seat,
           });
         commit(next);
         flush();
@@ -556,7 +561,7 @@ export function useGameSession(): SessionController {
   );
 
   const joinOnline = useCallback(
-    async (code: string, name: string) => {
+    async (code: string, name: string, seat: number) => {
       const clean = code.trim().toUpperCase();
       if (clean.length < 4) {
         setError("کد پنج‌حرفی اتاق را وارد کنید.");
@@ -575,6 +580,7 @@ export function useGameSession(): SessionController {
         joinHelloRef.current = {
           playerId: connection.selfId,
           name: guestName,
+          seat,
         };
         rememberSeat({
           roomId: clean,

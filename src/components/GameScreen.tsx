@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { BookOpen, Bot, Copy, Check, LogOut, RotateCcw, UserPlus, Volume2, VolumeX } from "lucide-react";
 import type { GameState, Intent } from "@/types/game";
 import { buildLayout } from "@/utils/boardGeometry";
-import { activePlayer, isFinishedProgress, legalMoves, playerFinished } from "@/utils/gameRules";
+import { activePlayer, legalMoves, playerFinished, tokenParked } from "@/utils/gameRules";
 import { faDigits, themeFor } from "@/utils/palette";
 import { Dice } from "@/components/Dice";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { LudoBoard } from "@/components/LudoBoard";
 
 interface GameScreenProps {
@@ -87,6 +88,7 @@ export function GameScreen(props: GameScreenProps) {
               {copied ? <Check size={16} /> : <Copy size={16} />}
             </button>
           ) : null}
+          <ThemeToggle />
           <button type="button" className="icon-btn" onClick={props.onToggleSound} aria-label={props.soundOn ? "بی‌صدا" : "صدادار"}>
             {props.soundOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
           </button>
@@ -142,7 +144,7 @@ export function GameScreen(props: GameScreenProps) {
                 <Dice value={state.dice} rolling={props.diceRolling} enabled={canRoll} label="" onRoll={() => props.onAct({ type: "roll" })} />
               </div>
             </div>
-            {state.lastMove && isFinishedProgress(state.lastMove.to, state.maxPlayers) ? (
+            {state.lastMove && tokenParked(state, state.lastMove.tokenId) ? (
               <div className="lg:order-1">
                 <ArriveNote state={state} />
               </div>
@@ -232,8 +234,8 @@ function ArriveNote({ state }: { state: GameState }) {
   const theme = themeFor(move.seat);
   const finished = player ? playerFinished(state, player.id) : false;
   const text = finished
-    ? `${player?.name ?? "بازیکن"} همه مهره‌ها را به مرکز رساند.`
-    : `${player?.name ?? "بازیکن"} یک مهره را به مرکز رساند.`;
+    ? `${player?.name ?? "بازیکن"} هر چهار مهره را در خانه‌های رنگی نشاند.`
+    : `${player?.name ?? "بازیکن"} یک مهره را در خانه رنگی نشاند.`;
   return (
     <p className="rounded-2xl px-4 py-3 text-center text-sm font-bold text-[#14324f]" style={{ background: theme.soft }}>
       {text}
@@ -358,10 +360,10 @@ function Rules({ onClose }: { onClose: () => void }) {
           <li>اگر روی خانهٔ حریف بنشینی، همهٔ مهره‌های او در آن خانه به چهارخانهٔ اول برمی‌گردند.</li>
           <li>از مهره‌های سر راه می‌توانی رد شوی. فقط نشستن روی همان خانه آن‌ها را می‌زند.</li>
           <li>زدن مهره هم یک تاس اضافه می‌دهد.</li>
-          <li>برای رسیدن به مرکز باید عدد دقیق بیاید. بیشتر از مرکز مجاز نیست.</li>
+          <li>در مسیر رنگی، مهره اول در خانه پنجم می‌ایستد، بعدی در چهارم، و همین‌طور عقب‌تر. از مهره جلویی نمی‌شود رد شد و عدد اضافه هم مجاز نیست.</li>
           <li>اگر با آن تاس حرکتی ممکن نباشد، نوبت رد می‌شود.</li>
           <li>برای انداختن تاس ۱۵ ثانیه وقت هست. اگر نیندازی نوبت نفر بعدی می‌شود.</li>
-          <li>هر کس زودتر هر چهار مهره را به مرکز برساند برنده بازی است. بقیه ادامه می‌دهند و نفر دوم و سوم مشخص می‌شود.</li>
+          <li>هر کس زودتر هر چهار مهره را در خانه‌های رنگی بنشاند برنده است. بقیه ادامه می‌دهند و نفر دوم و سوم مشخص می‌شود.</li>
         </ul>
         <button type="button" className="btn-primary mt-5" onClick={onClose}>
           برگشت به میز

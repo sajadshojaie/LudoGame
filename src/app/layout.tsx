@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Vazirmatn } from "next/font/google";
+import { ThemeBoot } from "@/components/ThemeToggle";
 import "./globals.css";
 
 const vazir = Vazirmatn({
@@ -15,7 +16,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="fa" dir="rtl" className={`${vazir.variable} h-full antialiased`}>
-      <body className="min-h-dvh text-[#16324d]">{children}</body>
+      <body className="min-h-dvh text-[#16324d]">
+        <ThemeBoot />
+        {children}
+      </body>
     </html>
   );
 }
