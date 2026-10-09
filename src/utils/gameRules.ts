@@ -3,8 +3,6 @@ import type {
   Intent,
   LastMove,
   LegalMove,
-  LogEntry,
-  LogTone,
   Player,
   PlayerCount,
   SeatSetup,
@@ -20,8 +18,6 @@ import {
   trackLength,
   buildLayout,
 } from "@/utils/boardGeometry";
-import { faDigits } from "@/utils/palette";
-
 export const DICE_MS = 880;
 export const TURN_LIMIT_MS = 15_000;
 export const HOP_MS = 340;
@@ -130,14 +126,6 @@ function baseState(partial: {
     introducedIds: [],
     openingMisses: {},
     rankings: [],
-    log: [
-      entry(
-        "system",
-        partial.status === "lobby"
-          ? "اتاق باز است. کد را بفرستید تا بقیه بنشینند."
-          : "مهره‌ها در خانه هستند. با آوردن ۶ بیرون می‌آیند.",
-      ),
-    ],
     busyUntil: 0,
     rollDeadline: 0,
     moveSeq: 0,
@@ -154,14 +142,6 @@ function nextOpenSeat(state: GameState): number {
 function defaultName(index: number, kind: "human" | "bot"): string {
   if (kind === "bot") return BOT_NAMES[index % BOT_NAMES.length];
   return `بازیکن ${index + 1}`;
-}
-
-function entry(tone: LogTone, text: string): LogEntry {
-  return { id: createId("log"), text, tone };
-}
-
-function withLog(state: GameState, tone: LogTone, text: string): LogEntry[] {
-  return [...state.log, entry(tone, text)].slice(-36);
 }
 
 function homeIndexOf(progress: number, count: PlayerCount): number | null {
@@ -314,7 +294,6 @@ export function applyRoll(state: GameState, value: number, now: number): GameSta
       currentPlayerIndex: next,
       busyUntil: now + DICE_MS + 420,
       rollDeadline: rollClock(state.players, next, now, now + DICE_MS + 420, true),
-      log: withLog(state, "six", `${player.name} برای سومین بار ${faDigits(6)} آورد. نوبت سوخت.`),
     };
   }
 
@@ -328,7 +307,6 @@ export function applyRoll(state: GameState, value: number, now: number): GameSta
       currentPlayerIndex: next,
       busyUntil: now + DICE_MS + 520,
       rollDeadline: rollClock(state.players, next, now, now + DICE_MS + 520, true),
-      log: withLog(state, "info", `${player.name} ${faDigits(value)} آورد. حرکتی ممکن نیست.`),
     };
   }
 
@@ -337,7 +315,6 @@ export function applyRoll(state: GameState, value: number, now: number): GameSta
     phase: "move",
     busyUntil: now + DICE_MS,
     rollDeadline: 0,
-    log: withLog(state, value === 6 ? "six" : "info", `${player.name} ${faDigits(value)} آورد.`),
   };
 }
 
@@ -355,7 +332,6 @@ export function passRoll(state: GameState, now: number): GameState {
     currentPlayerIndex: next,
     busyUntil,
     rollDeadline: rollClock(state.players, next, now, busyUntil, true),
-    log: withLog(state, "info", `${player.name} در ۱۵ ثانیه تاس نینداخت.`),
   };
 }
 
@@ -386,19 +362,6 @@ export function applyMove(state: GameState, tokenId: string, now: number): GameS
   const nextIndex = bonus
     ? state.currentPlayerIndex
     : nextPlayerIndex(state, state.currentPlayerIndex, tokens, rankings);
-
-  const capturedNames = move.captures
-    .map((id) => state.tokens.find((token) => token.id === id))
-    .filter((token): token is Token => Boolean(token))
-    .map((token) => state.players.find((item) => item.id === token.playerId)?.name ?? "یک مهره");
-
-  const bits = [`${player.name} یک مهره را جلو برد.`];
-  if (move.from < 0) bits[0] = `${player.name} یک مهره را از خانه بیرون آورد.`;
-  if (move.finishes) bits.push("در خانه رنگی نشست.");
-  if (capturedNames.length) bits.push(`${capturedNames.join(" و ")} را زد.`);
-  if (justFinished) bits.push(`${player.name} نفر ${rankings.indexOf(player.id) + 1} شد.`);
-  if (bonus && state.dice === 6) bits.push("یک تاس دیگر.");
-  else if (bonus) bits.push("زدن مهره یک تاس دیگر می‌دهد.");
 
   const lastMove: LastMove = {
     id: state.moveSeq + 1,
@@ -438,11 +401,6 @@ export function applyMove(state: GameState, tokenId: string, now: number): GameS
           ),
     moveSeq: state.moveSeq + 1,
     lastMove,
-    log: withLog(
-      state,
-      justFinished ? "win" : move.captures.length ? "capture" : "move",
-      bits.join(" "),
-    ),
   };
 }
 
@@ -465,12 +423,27 @@ export function addBot(state: GameState): GameState {
     revision: state.revision + 1,
     players,
     tokens: createTokens(players),
-    log: withLog(state, "system", `${name} به عنوان ربات نشست.`),
   };
 }
 
+export function findReturningPlayer(state: GameState, hello: { playerId: string; name?: string; seat?: number }, peerId: string): Player | undefined {
+  const humans = state.players.filter((item) => item.kind === "human");
+  const byId = humans.find((item) => item.id === hello.playerId || item.peerId === hello.playerId || item.peerId === peerId);
+  if (byId) return byId;
+  const name = hello.name?.trim() ?? "";
+  if (name) {
+    const byName = humans.find((item) => !item.connected && item.name === name);
+    if (byName) return byName;
+  }
+  if (hello.seat != null) {
+    const bySeat = humans.find((item) => !item.connected && item.seat === hello.seat);
+    if (bySeat) return bySeat;
+  }
+  return undefined;
+}
+
 export function addHuman(state: GameState, player: Player, requestedSeat?: number): GameState | null {
-  if (state.status !== "lobby") return null;
+  if (state.status !== "lobby" && state.status !== "playing") return null;
   if (state.players.some((item) => item.id === player.id || item.peerId === player.peerId)) return state;
   if (state.players.length >= state.maxPlayers) return null;
   const used = new Set(state.players.map((item) => item.seat));
@@ -483,8 +456,7 @@ export function addHuman(state: GameState, player: Player, requestedSeat?: numbe
     ...state,
     revision: state.revision + 1,
     players,
-    tokens: createTokens(players),
-    log: withLog(state, "system", `${seated.name} به بازی پیوست.`),
+    tokens: state.status === "lobby" ? createTokens(players) : [...state.tokens, ...createTokens([seated])],
   };
 }
 
@@ -510,7 +482,6 @@ export function startMatch(state: GameState, now: number): GameState {
     rollDeadline: rollClock(players, 0, now, now + 400, true),
     moveSeq: 0,
     lastMove: null,
-    log: withLog(state, "system", `بازی شروع شد. ${players[0].name} اول تاس می‌اندازد.`),
   };
 }
 
@@ -535,7 +506,6 @@ export function rematch(state: GameState, now: number): GameState {
     rollDeadline: rollClock(players, 0, now, now + 400, true),
     moveSeq: state.moveSeq + 1,
     lastMove: null,
-    log: [entry("system", "بازی دوباره. مهره‌ها برگشتند سر جای خود.")],
   };
 }
 
@@ -550,7 +520,6 @@ export function markPeerAway(state: GameState, peerId: string): GameState {
     revision: state.revision + 1,
     players,
     rollDeadline: pause ? 0 : state.rollDeadline,
-    log: withLog(state, "system", `ارتباط ${player.name} قطع شد. جایش حفظ است.`),
   };
 }
 
@@ -569,7 +538,6 @@ export function reattachHuman(state: GameState, playerId: string, peerId: string
     revision: state.revision + 1,
     players,
     rollDeadline: arm ? rollClock(players, state.currentPlayerIndex, Date.now(), Date.now(), true) : state.rollDeadline,
-    log: wasAway ? withLog(state, "system", `${player.name} برگشت.`) : state.log,
   };
 }
 
@@ -584,7 +552,6 @@ export function convertPeerToBot(state: GameState, peerId: string): GameState {
     revision: state.revision + 1,
     players,
     hostId: state.hostId === player.id ? state.hostId : state.hostId,
-    log: withLog(state, "system", `${player.name} رفت. ربات مهره‌هایش را ادامه می‌دهد.`),
   };
 }
 

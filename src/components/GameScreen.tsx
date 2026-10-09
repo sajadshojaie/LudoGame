@@ -77,9 +77,19 @@ export function GameScreen(props: GameScreenProps) {
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[#14324f]/10 px-3 py-2 lg:col-span-2 lg:px-4 lg:py-3">
         <div className="min-w-0">
           <p className="font-display text-xl leading-none text-[#14324f] lg:text-2xl">منچ بازی</p>
-          <p className="truncate text-xs text-[#5a7e99]">
-            {faDigits(state.maxPlayers)} نفره · {props.online ? `اتاق ${state.roomId}` : "روی همین دستگاه"}
-            {props.online ? ` · ${props.syncStatus === "live" ? "زنده" : "در حال اتصال"}` : ""}
+          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-[#5a7e99]">
+            <span className="truncate">
+              {faDigits(state.maxPlayers)} نفره · {props.online ? `اتاق ${state.roomId}` : "روی همین دستگاه"}
+            </span>
+            {props.online ? (
+              <span
+                className={`shrink-0 text-[10px] font-extrabold ${
+                  props.syncStatus === "live" ? "text-emerald-600" : "text-rose-600"
+                }`}
+              >
+                {props.syncStatus === "live" ? "وصل" : "قطع"}
+              </span>
+            ) : null}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -160,7 +170,6 @@ export function GameScreen(props: GameScreenProps) {
                   place={place(player.id)}
                   online={props.online}
                   linked={player.connected && !props.offlinePeerIds.includes(player.peerId ?? "")}
-                  roll={state.phase === "roll" && !props.diceRolling && displayed?.id === player.id}
                 />
               ))}
               {state.rankings.length > 0 && (props.isHost || !props.online) ? (
@@ -316,7 +325,6 @@ function SeatCard({
   place,
   online,
   linked,
-  roll,
 }: {
   name: string;
   seat: number;
@@ -325,7 +333,6 @@ function SeatCard({
   place: number | null;
   online: boolean;
   linked: boolean;
-  roll: boolean;
 }) {
   const theme = themeFor(seat);
   return (
@@ -334,12 +341,6 @@ function SeatCard({
       style={active ? { outline: `2px solid ${theme.hex}` } : undefined}
     >
       <span className="h-4 w-4 shrink-0 rounded-full" style={{ background: theme.hex }} />
-      {roll ? (
-        <span className="flex shrink-0 items-center gap-0.5" aria-hidden>
-          <span className="h-4 w-1 rounded-full bg-[#14324f]" />
-          <span className="h-4 w-1 rounded-full bg-[#14324f]" />
-        </span>
-      ) : null}
       <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#14324f] lg:text-sm">{name}</span>
       {online && !bot ? <LinkDot on={linked} /> : null}
       {bot && !place ? <Bot size={14} className="shrink-0 text-[#7f9aaf]" /> : null}

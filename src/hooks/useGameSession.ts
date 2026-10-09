@@ -10,9 +10,9 @@ import {
   HOP_MS,
   addHuman,
   applyIntent,
-  convertPeerToBot,
   markPeerAway,
   reattachHuman,
+  findReturningPlayer,
   createLobby,
   createLocalMatch,
   hopDuration,
@@ -120,7 +120,13 @@ export function useGameSession(): SessionController {
   const announceSelf = useCallback((target?: string) => {
     const hello = joinHelloRef.current;
     if (!hello) return;
-    if (hostRef.current && stateRef.current?.players.some((player) => player.id === hello.playerId && player.connected)) return;
+    if (
+      hostRef.current &&
+      stateRef.current?.players.some(
+        (player) => player.connected && (player.id === hello.playerId || player.peerId === hello.playerId),
+      )
+    )
+      return;
     connRef.current?.send(
       { kind: "hello", playerId: hello.playerId, name: hello.name, seat: hello.seat },
       target,
@@ -141,7 +147,12 @@ export function useGameSession(): SessionController {
       const hello = joinHelloRef.current;
       const view = stateRef.current;
       if (!hello) return;
-      if (view?.players.some((player) => player.id === hello.playerId && player.connected)) return;
+      if (
+        view?.players.some(
+          (player) => player.connected && (player.id === hello.playerId || player.peerId === hello.playerId),
+        )
+      )
+        return;
       announceSelf();
     }, 1200);
     return () => window.clearInterval(timer);
@@ -283,22 +294,12 @@ export function useGameSession(): SessionController {
           return;
         }
         if (!prev) return;
-        const existing = prev.players.find(
-          (player) => player.id === message.playerId || player.peerId === peerId,
-        );
-        if (existing?.kind === "human") {
+        const existing = findReturningPlayer(prev, message, peerId);
+        if (existing) {
           const next = reattachHuman(prev, existing.id, peerId);
           if (next !== prev) commit(next);
           publish(next === prev ? prev : next);
           setOfflinePeerIds((ids) => ids.filter((id) => id !== peerId && id !== existing.peerId));
-          return;
-        }
-        if (prev.status !== "lobby") {
-          connRef.current?.send(
-            { kind: "reject", reason: "این بازی شروع شده. فقط می‌توانید تماشا کنید." },
-            peerId,
-          );
-          publish(prev, peerId);
           return;
         }
         const next = addHuman(
@@ -335,9 +336,19 @@ export function useGameSession(): SessionController {
           if (hostRef.current && incoming !== message.state) publish(incoming);
         }
         const view = stateRef.current;
+        const self = myIdRef.current;
+        const mine = view?.players.find((player) => player.id === self || player.peerId === self);
+        if (mine) {
+          if (mine.id !== myIdRef.current) {
+            myIdRef.current = mine.id;
+            setMyId(mine.id);
+          }
+          if (joinHelloRef.current) joinHelloRef.current = { ...joinHelloRef.current, playerId: mine.id };
+          setWaiting(false);
+        }
         if (
           hello &&
-          view?.status === "lobby" &&
+          view &&
           !view.players.some(
             (player) => player.id === hello.playerId || player.peerId === myIdRef.current,
           )
@@ -359,50 +370,46 @@ export function useGameSession(): SessionController {
   );
 
   const handleLeavePeer = useCallback(
-    (peerId: string, explicit: boolean) => {
+    (peerId: string, _explicit: boolean) => {
       const prev = stateRef.current;
       if (!prev) return;
-      if (!explicit) {
-        setOfflinePeerIds((ids) => (ids.includes(peerId) ? ids : [...ids, peerId]));
-        if (!hostRef.current) return;
-        const next = markPeerAway(prev, peerId);
-        if (next !== prev) {
-          commit(next);
-          publish(next);
-        }
-        return;
-      }
-      setOfflinePeerIds((ids) => ids.filter((id) => id !== peerId));
-      const hostPlayer = prev.players.find((player) => player.id === prev.hostId);
+      setOfflinePeerIds((ids) => (ids.includes(peerId) ? ids : [...ids, peerId]));
+      const away = markPeerAway(prev, peerId);
+      const hostPlayer = away.players.find((player) => player.id === away.hostId);
+      const hostGone = hostPlayer?.peerId === peerId || !hostPlayer?.connected;
+
       if (hostRef.current) {
-        const next = convertPeerToBot(prev, peerId);
-        if (next !== prev) {
-          commit(next);
-          publish(next);
+        if (away !== prev) {
+          commit(away);
+          publish(away);
         }
         return;
       }
-      if (hostPlayer?.peerId !== peerId) return;
+
+      if (!hostGone) return;
       const alive = new Set(connRef.current?.peerIds() ?? []);
       if (myIdRef.current) alive.add(myIdRef.current);
       alive.delete(peerId);
-      const candidates = prev.players
+      const candidates = away.players
         .filter(
           (player) =>
             player.kind === "human" &&
+            player.connected &&
             player.peerId &&
             player.peerId !== peerId &&
-            alive.has(player.peerId),
+            (alive.has(player.peerId) || player.id === myIdRef.current || player.peerId === myIdRef.current),
         )
         .sort((a, b) => a.seat - b.seat);
-      if (candidates[0]?.peerId !== myIdRef.current) return;
+      const me = away.players.find(
+        (player) => player.id === myIdRef.current || player.peerId === myIdRef.current,
+      );
+      if (!me || candidates[0]?.id !== me.id) return;
       hostRef.current = true;
       setIsHost(true);
-      const converted = convertPeerToBot(prev, peerId);
       const next = {
-        ...converted,
-        hostId: myIdRef.current ?? converted.hostId,
-        revision: converted.revision + 1,
+        ...away,
+        hostId: me.id,
+        revision: away.revision + 1,
       };
       commit(next);
       publish(next);
@@ -598,7 +605,7 @@ export function useGameSession(): SessionController {
         window.setTimeout(() => {
           if (!stateRef.current) {
             setSyncDetail(
-              "هنوز میزبان پیدا نشده. هر دو صفحه را باز نگه دارید؛ اتصال از اینترنت رد می‌شود و ممکن است کمی طول بکشد.",
+              "هنوز میزبان پیدا نشده. هر دو صفحه را باز نگه دارید تا به اتاق وصل شود.",
             );
           }
         }, 12000);

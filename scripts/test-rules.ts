@@ -12,6 +12,7 @@ import {
   openingFaceCount,
   startMatch,
   createLobby,
+  findReturningPlayer,
   markPeerAway,
   reattachHuman,
   tokenParked,
@@ -150,7 +151,6 @@ function fresh(count: PlayerCount = 4) {
   state = applyRoll(state, 6, 0);
   assert.equal(state.currentPlayerIndex, 1);
   assert.equal(state.consecutiveSixes, 0);
-  assert.match(state.log.at(-1)?.text ?? "", /سومین بار/);
 }
 
 {
@@ -410,7 +410,6 @@ function fresh(count: PlayerCount = 4) {
   assert.equal(early, null);
   state = applyIntent(state, { type: "pass" }, state.hostId, state.rollDeadline)!;
   assert.notEqual(state.currentPlayerIndex, before);
-  assert.match(state.log.at(-1)?.text ?? "", /تاس نینداخت/);
 }
 
 {
@@ -427,6 +426,24 @@ function fresh(count: PlayerCount = 4) {
   assert.equal(back.players[0].peerId, "peer-b");
   assert.equal(back.players[0].kind, "human");
   assert.ok(back.rollDeadline > Date.now());
+}
+
+{
+  const lobby = createLobby({ roomId: "BACK", hostId: "host", hostName: "سجاد", count: 2, peerId: "host" });
+  const seated = addHuman(
+    lobby,
+    { id: "guest", name: "میلاد", seat: 2, kind: "human", peerId: "old", connected: true },
+    2,
+  )!;
+  const started = startMatch(seated, 0);
+  const away = markPeerAway(started, "old");
+  const found = findReturningPlayer(away, { playerId: "new-id", name: "میلاد", seat: 2 }, "new-peer");
+  assert.equal(found?.id, "guest");
+  const back = reattachHuman(away, found!.id, "new-peer");
+  assert.equal(back.players.find((player) => player.id === "guest")?.connected, true);
+  assert.equal(back.tokens.filter((token) => token.playerId === "host").length, 4);
+  const stranger = findReturningPlayer(back, { playerId: "x", name: "کس دیگری", seat: 0 }, "x");
+  assert.equal(stranger, undefined);
 }
 
 console.log("rules ok");

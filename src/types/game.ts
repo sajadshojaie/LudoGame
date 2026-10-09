@@ -4,8 +4,6 @@ export type MatchStatus = "lobby" | "playing" | "finished";
 
 export type TurnPhase = "lobby" | "roll" | "move";
 
-export type LogTone = "info" | "move" | "capture" | "six" | "win" | "system";
-
 export interface Player {
   id: string;
   name: string;
@@ -28,12 +26,6 @@ export interface Token {
    * A token is finished when it parks in that lane, from the last house backward.
    */
   progress: number;
-}
-
-export interface LogEntry {
-  id: string;
-  text: string;
-  tone: LogTone;
 }
 
 export interface LastMove {
@@ -65,7 +57,6 @@ export interface GameState {
   /** Failed yard rolls per player, before their first token comes out. */
   openingMisses: Record<string, number>;
   rankings: string[];
-  log: LogEntry[];
   busyUntil: number;
   /** Epoch ms when the current human must have rolled. 0 while it is not their roll. */
   rollDeadline: number;
